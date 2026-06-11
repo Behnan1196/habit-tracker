@@ -5,81 +5,86 @@ import path from 'path';
 const BACKUP_FILE = path.join(process.cwd(), 'backups.json');
 const REDIS_KEY = 'habit-backups';
 
-async function runRedisCommand(command: string[]) {
-  const url = process.env.KV_REST_API_URL;
-  const token = process.env.KV_REST_API_TOKEN;
-  if (!url || !token) return null;
-
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(command),
-    });
-
-    if (!res.ok) {
-      console.error(`Redis command failed: ${res.statusText}`);
-      return null;
-    }
-
-    const data = await res.json();
-    return data.result;
-  } catch (error) {
-    console.error('Redis connection error:', error);
-    return null;
-  }
+// --- Redis helpers (only used when REDIS_URL is set) ---
+async function getRedisClient() {
+  const url = process.env.REDIS_URL;
+  if (!url) return null;
+  // Dynamic import to avoid issues in local (no package needed)
+  const { createClient } = await import('redis');
+  const client = createClient({ url });
+  client.on('error', (err) => console.error('Redis error:', err));
+  await client.connect();
+  return client;
 }
 
+// --- Read backups ---
 async function getBackups(): Promise<any[]> {
-  const isVercelKv = !!process.env.KV_REST_API_URL && !!process.env.KV_REST_API_TOKEN;
+  const isVercel = !!process.env.VERCEL;
+  const hasRedis = !!process.env.REDIS_URL;
 
-  if (isVercelKv) {
-    const result = await runRedisCommand(['GET', REDIS_KEY]);
-    if (result) {
-      try {
-        return JSON.parse(result);
-      } catch {
-        return [];
-      }
-    }
-    return [];
-  } else {
+  if (hasRedis) {
+    let client: any = null;
     try {
-      const data = await fs.readFile(BACKUP_FILE, 'utf8');
-      return JSON.parse(data);
-    } catch {
+      client = await getRedisClient();
+      if (!client) return [];
+      const raw = await client.get(REDIS_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (err) {
+      console.error('Redis GET error:', err);
       return [];
+    } finally {
+      if (client) await client.disconnect();
     }
+  }
+
+  if (isVercel) {
+    // Running on Vercel without Redis configured
+    throw new Error('Redis veritabanı bağlanmamış. Vercel panelinden REDIS_URL değişkeninin tanımlı olduğundan emin olun.');
+  }
+
+  // Local fallback: use backups.json
+  try {
+    const data = await fs.readFile(BACKUP_FILE, 'utf8');
+    return JSON.parse(data);
+  } catch {
+    return [];
   }
 }
 
+// --- Write backups ---
 async function saveBackups(backups: any[]): Promise<void> {
-  const isVercelKv = !!process.env.KV_REST_API_URL && !!process.env.KV_REST_API_TOKEN;
+  const isVercel = !!process.env.VERCEL;
+  const hasRedis = !!process.env.REDIS_URL;
 
-  if (isVercelKv) {
-    const result = await runRedisCommand(['SET', REDIS_KEY, JSON.stringify(backups)]);
-    if (result === null) {
-      throw new Error('Vercel KV veritabanına yazılırken bir hata oluştu.');
-    }
-  } else {
-    // Check if running on Vercel without KV
-    const isVercel = !!process.env.VERCEL;
-    if (isVercel) {
-      throw new Error('Bulut yedekleme altyapısı (Vercel KV) bağlanmamış. Lütfen Vercel panelinden projenize bir KV veritabanı ekleyin.');
-    }
-
+  if (hasRedis) {
+    let client: any = null;
     try {
-      await fs.writeFile(BACKUP_FILE, JSON.stringify(backups, null, 2), 'utf8');
-    } catch (error) {
-      console.error('Failed to write local backup file:', error);
-      throw new Error('Lokal yedek dosyası (backups.json) yazılamadı.');
+      client = await getRedisClient();
+      if (!client) throw new Error('Redis bağlantısı kurulamadı.');
+      await client.set(REDIS_KEY, JSON.stringify(backups));
+    } catch (err: any) {
+      console.error('Redis SET error:', err);
+      throw new Error('Yedek kaydedilirken Redis hatası: ' + err.message);
+    } finally {
+      if (client) await client.disconnect();
     }
+    return;
+  }
+
+  if (isVercel) {
+    throw new Error('Redis veritabanı bağlanmamış. Vercel panelinden REDIS_URL değişkeninin tanımlı olduğundan emin olun.');
+  }
+
+  // Local fallback: write to backups.json
+  try {
+    await fs.writeFile(BACKUP_FILE, JSON.stringify(backups, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Failed to write local backup file:', err);
+    throw new Error('Lokal yedek dosyası yazılamadı.');
   }
 }
 
+// --- API handlers ---
 export async function GET() {
   try {
     const backups = await getBackups();
@@ -92,8 +97,8 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    if (!body || !body.state) {
-      return NextResponse.json({ success: false, error: 'State is required' }, { status: 400 });
+    if (!body?.state) {
+      return NextResponse.json({ success: false, error: 'State gereklidir.' }, { status: 400 });
     }
 
     const currentBackups = await getBackups();
@@ -103,7 +108,6 @@ export async function POST(request: Request) {
       state: body.state,
     };
 
-    // Keep only the last 3 backups
     const updatedBackups = [newBackup, ...currentBackups].slice(0, 3);
     await saveBackups(updatedBackups);
 
