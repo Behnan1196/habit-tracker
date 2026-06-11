@@ -2,6 +2,7 @@
   width: 100%;
   max-width: 720px;
   margin: 0 auto;
+  overflow-x: hidden;
 }
 
 .loading {
@@ -68,6 +69,7 @@
   border-radius: 16px;
   padding: 12px;
   margin-top: 16px;
+  overflow-x: auto;
 }
 
 .tableHeader {
