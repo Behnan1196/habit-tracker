@@ -14,9 +14,10 @@ interface Props {
   dragHandleProps?: any;
   isEditMode?: boolean;
   depth?: number;
+  isFixed?: boolean;
 }
 
-export default function GroupRow({ group, isCollapsed, childCount, completedCount, onToggle, onEdit, onAddChild, dragHandleProps, isEditMode, depth = 0 }: Props) {
+export default function GroupRow({ group, isCollapsed, childCount, completedCount, onToggle, onEdit, onAddChild, dragHandleProps, isEditMode, depth = 0, isFixed }: Props) {
   const badgeClass = childCount === 0
     ? styles.badge
     : completedCount === childCount
@@ -59,6 +60,11 @@ export default function GroupRow({ group, isCollapsed, childCount, completedCoun
           <polyline points="6 9 12 15 18 9" />
         </svg>
         <span className={styles.groupName} style={{ color: group.color }}>{group.name}</span>
+        {isFixed && (
+          <span className={styles.fixedBadge} title="Sabit liste">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg>
+          </span>
+        )}
         <span className={badgeClass}>
           {completedCount}/{childCount}
         </span>

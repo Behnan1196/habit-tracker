@@ -17,6 +17,7 @@ interface Props {
   depth?: number;
   groupColor?: string;
   selectedDayIndex?: number;
+  isFixed?: boolean;
 }
 
 export default function HabitRow({ habit, days, getCellState, onCycleCell, onEdit, todayIndex, dragHandleProps, isEditMode, depth = 0, groupColor, selectedDayIndex }: Props) {

@@ -15,11 +15,12 @@ interface Props {
 
 export default function EditModal({ open, initial, groups, onSave, onDelete, onClose }: Props) {
   const [name, setName] = useState('');
-  const [type, setType] = useState<'habit' | 'group' | 'separator' | 'metric'>('habit');
+  const [type, setType] = useState<'habit' | 'group' | 'metric'>('habit');
   const [color, setColor] = useState(PRESET_COLORS[0].value);
   const [backColor, setBackColor] = useState('');
   const [groupId, setGroupId] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
+  const [isFixed, setIsFixed] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -29,6 +30,7 @@ export default function EditModal({ open, initial, groups, onSave, onDelete, onC
       setBackColor(initial?.backColor ?? '');
       setGroupId(initial?.groupId ?? null);
       setNotes(initial?.notes ?? '');
+      setIsFixed(initial?.isFixed ?? false);
     }
   }, [open, initial]);
 
@@ -47,7 +49,8 @@ export default function EditModal({ open, initial, groups, onSave, onDelete, onC
       color, 
       backColor: backColor || undefined,
       groupId,
-      notes: notes.trim()
+      notes: notes.trim(),
+      isFixed,
     });
     onClose();
   };
@@ -99,12 +102,6 @@ export default function EditModal({ open, initial, groups, onSave, onDelete, onC
             Grup Başlığı
           </button>
           <button
-            className={`${styles.typeBtn} ${type === 'separator' ? styles.active : ''}`}
-            onClick={() => setType('separator')}
-          >
-            Ayıraç
-          </button>
-          <button
             className={`${styles.typeBtn} ${type === 'metric' ? styles.active : ''}`}
             onClick={() => setType('metric')}
           >
@@ -118,7 +115,7 @@ export default function EditModal({ open, initial, groups, onSave, onDelete, onC
           className={styles.input}
           value={name}
           onChange={e => setName(e.target.value)}
-          placeholder={type === 'group' ? 'örn. Vitaminler' : type === 'separator' ? 'örn. SABAH' : type === 'metric' ? 'örn. Bel Ölçüsü (cm)' : 'örn. D Vitamini'}
+          placeholder={type === 'group' ? 'örn. Vitaminler' : type === 'metric' ? 'örn. Bel Ölçüsü (cm)' : 'örn. D Vitamini'}
           autoFocus
           autoCapitalize="sentences"
           onKeyDown={e => e.key === 'Enter' && handleSave()}
@@ -133,6 +130,21 @@ export default function EditModal({ open, initial, groups, onSave, onDelete, onC
           placeholder="Bu öğe ile ilgili ek bilgiler..."
           rows={2}
         />
+
+        {/* isFixed toggle */}
+        {type !== 'metric' && (
+          <label className={styles.checkboxLabel}>
+            <input
+              type="checkbox"
+              checked={isFixed}
+              onChange={e => setIsFixed(e.target.checked)}
+            />
+            <span>
+              <strong>Sabit &mdash; haftalık sıfırlanmaz</strong>
+              <span className={styles.checkboxHint}> (yapılacaklar, alışveriş vb.)</span>
+            </span>
+          </label>
+        )}
 
         {/* Group select (now available for groups, separators, and metrics!) */}
         {groups.length > 0 && (

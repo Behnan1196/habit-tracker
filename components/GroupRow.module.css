@@ -72,6 +72,13 @@
   background: #10b981; /* Green */
 }
 
+.fixedBadge {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
 .editBtn,
 .addBtn {
   background: none;

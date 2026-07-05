@@ -1,6 +1,6 @@
 export type CellState = string;
 
-export type HabitType = 'group' | 'habit' | 'separator' | 'metric';
+export type HabitType = 'group' | 'habit' | 'metric';
 
 export interface HabitItem {
   id: string;
@@ -11,6 +11,7 @@ export interface HabitItem {
   groupId: string | null; // null = top level
   order: number;
   notes?: string;
+  isFixed?: boolean; // true = persistent across weeks (todo-style)
 }
 
 export interface WeeklyData {

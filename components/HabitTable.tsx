@@ -7,7 +7,6 @@ import { useState, useMemo, useEffect } from 'react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import HabitRow from './HabitRow';
 import GroupRow from './GroupRow';
-import SeparatorRow from './SeparatorRow';
 import MetricRow from './MetricRow';
 import WeekNavigation from './WeekNavigation';
 import EditModal from './EditModal';
@@ -102,19 +101,16 @@ export default function HabitTable() {
   };
 
   // A truly recursive component to handle infinite depth
-  const RenderNodeWithDrag = ({ item, depth, groupColor, dragHandleProps }: { item: HabitItem, depth: number, groupColor?: string, dragHandleProps?: any }) => {
-    if (item.type === 'separator') {
-      return (
-        <SeparatorRow 
-          item={item} 
-          onEdit={() => openEditModal(item)} 
-          dragHandleProps={dragHandleProps}
-          isEditMode={isEditMode}
-          depth={depth}
-        />
-      );
+  const isItemFixed = (item: HabitItem): boolean => {
+    if (item.isFixed) return true;
+    if (item.groupId) {
+      const parent = sortedHabits.find(h => h.id === item.groupId);
+      if (parent?.isFixed) return true;
     }
-    
+    return false;
+  };
+
+  const RenderNodeWithDrag = ({ item, depth, groupColor, dragHandleProps }: { item: HabitItem, depth: number, groupColor?: string, dragHandleProps?: any }) => {
     if (item.type === 'habit') {
       return (
         <HabitRow
@@ -129,6 +125,7 @@ export default function HabitTable() {
           depth={depth}
           groupColor={groupColor}
           selectedDayIndex={viewMode === 'daily' ? selectedDayIndex : undefined}
+          isFixed={isItemFixed(item)}
         />
       );
     }
@@ -168,6 +165,7 @@ export default function HabitTable() {
             dragHandleProps={dragHandleProps}
             isEditMode={isEditMode}
             depth={depth}
+            isFixed={item.isFixed}
           />
           
           {!isCollapsed(item.id) && (

@@ -24,9 +24,24 @@ export function useHabits() {
   }, []);
 
   // --- Cell ---
+  // Fixed items use a special 'global' key so they persist across weeks
+  const getWeekKeyForHabit = useCallback((habitId: string): string => {
+    if (!state) return currentWeek;
+    const habit = state.habits.find(h => h.id === habitId);
+    if (!habit) return currentWeek;
+    // Check if the item itself or its parent group is fixed
+    if (habit.isFixed) return 'global';
+    if (habit.groupId) {
+      const parent = state.habits.find(h => h.id === habit.groupId);
+      if (parent?.isFixed) return 'global';
+    }
+    return currentWeek;
+  }, [state, currentWeek]);
+
   const cycleCell = useCallback((habitId: string, dayIndex: number) => {
     update(prev => {
-      const weekData = prev.weeklyData[currentWeek] ?? {};
+      const weekKey = getWeekKeyForHabit(habitId);
+      const weekData = prev.weeklyData[weekKey] ?? {};
       const habitData = weekData[habitId] ?? {};
       const current = (habitData[dayIndex] as string) ?? 'empty';
       // If it's not a standard cycle value, fall back to empty
@@ -39,13 +54,14 @@ export function useHabits() {
         newHabitData[dayIndex] = next;
       }
       const newWeekData = { ...weekData, [habitId]: newHabitData };
-      return { ...prev, weeklyData: { ...prev.weeklyData, [currentWeek]: newWeekData } };
+      return { ...prev, weeklyData: { ...prev.weeklyData, [weekKey]: newWeekData } };
     });
-  }, [currentWeek, update]);
+  }, [getWeekKeyForHabit, update]);
 
   const updateCell = useCallback((habitId: string, dayIndex: number, text: string) => {
     update(prev => {
-      const weekData = prev.weeklyData[currentWeek] ?? {};
+      const weekKey = getWeekKeyForHabit(habitId);
+      const weekData = prev.weeklyData[weekKey] ?? {};
       const habitData = weekData[habitId] ?? {};
       const newHabitData = { ...habitData };
       if (!text.trim()) {
@@ -54,14 +70,15 @@ export function useHabits() {
         newHabitData[dayIndex] = text;
       }
       const newWeekData = { ...weekData, [habitId]: newHabitData };
-      return { ...prev, weeklyData: { ...prev.weeklyData, [currentWeek]: newWeekData } };
+      return { ...prev, weeklyData: { ...prev.weeklyData, [weekKey]: newWeekData } };
     });
-  }, [currentWeek, update]);
+  }, [getWeekKeyForHabit, update]);
 
   const getCellState = useCallback((habitId: string, dayIndex: number): CellState => {
     if (!state) return 'empty';
-    return (state.weeklyData[currentWeek]?.[habitId]?.[dayIndex] as CellState) ?? 'empty';
-  }, [state, currentWeek]);
+    const weekKey = getWeekKeyForHabit(habitId);
+    return (state.weeklyData[weekKey]?.[habitId]?.[dayIndex] as CellState) ?? 'empty';
+  }, [state, getWeekKeyForHabit]);
 
   // --- Group collapse ---
   const toggleGroup = useCallback((groupId: string) => {
@@ -141,6 +158,7 @@ export function useHabits() {
     cycleCell,
     updateCell,
     getCellState,
+    getWeekKeyForHabit,
     toggleGroup,
     isCollapsed,
     addHabit,
