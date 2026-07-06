@@ -33,6 +33,8 @@ export default function EditModal({ open, initial, groups, onSave, onDelete, onC
       setGroupId(initial?.groupId ?? null);
       setNotes(initial?.notes ?? '');
       setIsFixed(initial?.isFixed ?? false);
+      setMin(initial?.min ?? undefined);
+      setMax(initial?.max ?? undefined);
     }
   }, [open, initial]);
 
