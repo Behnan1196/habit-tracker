@@ -23,14 +23,14 @@ function getMetricValues(habit: HabitItem, weekKey: string, daysCount: number, g
 }
 
 export default function MetricDashboard() {
-  const { state, getCellState } = useHabits();
+  const { state, getCellState, currentWeek } = useHabits();
   const metrics = state?.habits.filter(h => h.type === 'metric') ?? [];
   const daysCount = 7; // week view
 
   const data = Array.from({ length: daysCount }, (_, dayIdx) => {
     const entry: any = { day: `Day ${dayIdx + 1}` };
     metrics.forEach(metric => {
-      const values = getMetricValues(metric, state?.currentWeek ?? '', daysCount, getCellState);
+      const values = getMetricValues(metric, currentWeek ?? '', daysCount, getCellState);
       entry[metric.id] = values[dayIdx];
     });
     return entry;
