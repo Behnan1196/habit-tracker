@@ -1,3 +1,4 @@
+'use client';
 import React from 'react';
 import { useHabits } from '@/hooks/useHabits';
 import { HabitItem } from '@/types';
