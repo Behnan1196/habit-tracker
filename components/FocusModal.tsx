@@ -34,6 +34,18 @@ export default function FocusModal({ open, onClose, habits, getCellState, onCycl
   // Filter habits that were 'planned' when the modal opened
   const plannedHabits = habits.filter(h => activeHabitIds.includes(h.id));
 
+  // Get ordered list of all groups (type === 'group') in the same order as in habits
+  const orderedGroups = habits.filter(h => h.type === 'group');
+
+  // Helper to build full hierarchical name and path of a group
+  const getGroupPath = (gId: string): string => {
+    const group = habits.find(x => x.id === gId);
+    if (!group) return '';
+    if (!group.groupId) return group.name;
+    const parentPath = getGroupPath(group.groupId);
+    return parentPath ? `${parentPath} / ${group.name}` : group.name;
+  };
+
   const getGroup = (gId: string) => habits.find(x => x.id === gId);
 
   const groupedHabits: Record<string, HabitItem[]> = {};
@@ -41,14 +53,15 @@ export default function FocusModal({ open, onClose, habits, getCellState, onCycl
 
   plannedHabits.forEach(h => {
     if (h.groupId) {
-      const topLevelGroupId = h.groupId; // We could resolve the ultimate top-level group, but the immediate parent group is fine since the user said "ait olduğu grup". 
-      // Actually, if we just use immediate parent, we might have multiple subgroups. Let's just group by immediate parent.
-      if (!groupedHabits[topLevelGroupId]) groupedHabits[topLevelGroupId] = [];
-      groupedHabits[topLevelGroupId].push(h);
+      if (!groupedHabits[h.groupId]) groupedHabits[h.groupId] = [];
+      groupedHabits[h.groupId].push(h);
     } else {
       noGroupHabits.push(h);
     }
   });
+
+  // Filter orderedGroups to only those that have planned habits
+  const activeOrderedGroups = orderedGroups.filter(g => groupedHabits[g.id] && groupedHabits[g.id].length > 0);
 
   const renderHabitRow = (habit: HabitItem) => (
     <div key={habit.id} className={styles.itemRow}>
@@ -92,12 +105,27 @@ export default function FocusModal({ open, onClose, habits, getCellState, onCycl
             </div>
           ) : (
             <div className={styles.groupedList}>
-              {Object.entries(groupedHabits).map(([groupId, items]) => {
-                const group = getGroup(groupId);
+              {activeOrderedGroups.map(group => {
+                const items = groupedHabits[group.id];
+                const displayName = getGroupPath(group.id);
+                const headerStyle: React.CSSProperties = {
+                  color: group.color,
+                  borderLeft: `4px solid ${group.color}`,
+                  padding: '6px 12px',
+                  borderRadius: '6px',
+                  marginBottom: '8px',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.08em',
+                  background: group.backColor || 'var(--surface-2)',
+                  display: 'flex',
+                  alignItems: 'center'
+                };
                 return (
-                  <div key={groupId} className={styles.groupContainer}>
-                    <div className={styles.groupHeader} style={{ color: group?.color || 'var(--text-primary)' }}>
-                      {group ? group.name : 'Bilinmeyen Grup'}
+                  <div key={group.id} className={styles.groupContainer}>
+                    <div style={headerStyle}>
+                      {displayName}
                     </div>
                     {items.map(renderHabitRow)}
                   </div>
@@ -106,7 +134,7 @@ export default function FocusModal({ open, onClose, habits, getCellState, onCycl
               
               {noGroupHabits.length > 0 && (
                 <div className={styles.groupContainer}>
-                  {Object.keys(groupedHabits).length > 0 && (
+                  {activeOrderedGroups.length > 0 && (
                     <div className={styles.groupHeader}>Diğer Görevler</div>
                   )}
                   {noGroupHabits.map(renderHabitRow)}
