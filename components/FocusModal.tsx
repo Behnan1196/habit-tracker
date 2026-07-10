@@ -34,9 +34,6 @@ export default function FocusModal({ open, onClose, habits, getCellState, onCycl
   // Filter habits that were 'planned' when the modal opened
   const plannedHabits = habits.filter(h => activeHabitIds.includes(h.id));
 
-  // Get ordered list of all groups (type === 'group') in the same order as in habits
-  const orderedGroups = habits.filter(h => h.type === 'group');
-
   // Helper to build full hierarchical name and path of a group
   const getGroupPath = (gId: string): string => {
     const group = habits.find(x => x.id === gId);
@@ -46,7 +43,25 @@ export default function FocusModal({ open, onClose, habits, getCellState, onCycl
     return parentPath ? `${parentPath} / ${group.name}` : group.name;
   };
 
-  const getGroup = (gId: string) => habits.find(x => x.id === gId);
+  // Generate the exact flattened visual sequence of groups and non-group items as they appear in the accordion
+  const visualSequence: { type: 'group' | 'no-group', id: string, name: string, color?: string, backColor?: string }[] = [];
+  
+  const traverse = (parentId: string | null) => {
+    const children = habits.filter(h => h.groupId === parentId);
+    children.forEach(child => {
+      if (child.type === 'group') {
+        visualSequence.push({
+          type: 'group',
+          id: child.id,
+          name: getGroupPath(child.id),
+          color: child.color,
+          backColor: child.backColor
+        });
+        traverse(child.id);
+      }
+    });
+  };
+  traverse(null);
 
   const groupedHabits: Record<string, HabitItem[]> = {};
   const noGroupHabits: HabitItem[] = [];
@@ -60,8 +75,10 @@ export default function FocusModal({ open, onClose, habits, getCellState, onCycl
     }
   });
 
-  // Filter orderedGroups to only those that have planned habits
-  const activeOrderedGroups = orderedGroups.filter(g => groupedHabits[g.id] && groupedHabits[g.id].length > 0);
+  // Filter visualSequence groups to only those containing planned items
+  const activeOrderedGroups = visualSequence.filter(entry => 
+    entry.type === 'group' && groupedHabits[entry.id] && groupedHabits[entry.id].length > 0
+  );
 
   const renderHabitRow = (habit: HabitItem) => (
     <div key={habit.id} className={styles.itemRow}>
