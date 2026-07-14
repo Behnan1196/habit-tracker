@@ -1,9 +1,5 @@
-import HabitTable from '@/components/HabitTable';
+import { AuthGate } from '@/components/auth-gate';
 
 export default function Home() {
-  return (
-    <main className="main-content">
-      <HabitTable />
-    </main>
-  );
+  return <AuthGate />;
 }
