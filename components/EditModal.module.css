@@ -99,7 +99,8 @@
 }
 
 .typeToggle {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
   background: var(--paper);
   border-radius: 10px;
   padding: 4px;
@@ -124,6 +125,7 @@
   background: var(--accent);
   color: #fff;
 }
+.typeBtn:disabled:not(.active) { opacity: .3; cursor: not-allowed; }
 .typeBtn { display: grid; gap: 2px; }.typeBtn strong { font-size: .78rem; }.typeBtn small { font-size: .62rem; font-weight: 400; opacity: .75; }
 
 .label {

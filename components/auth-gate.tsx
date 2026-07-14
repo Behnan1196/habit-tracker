@@ -9,7 +9,7 @@ import styles from './planner-shell.module.css';
 
 type AuthMode = 'signin' | 'signup' | 'forgot';
 
-export function AuthGate({ view = 'planner' }: { view?: 'planner' | 'metrics' | 'analytics' }) {
+export function AuthGate({ view = 'planner' }: { view?: 'planner' | 'analytics' }) {
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const [mode, setMode] = useState<AuthMode>('signin');
   const [recovery, setRecovery] = useState(false);
@@ -86,7 +86,7 @@ export function AuthGate({ view = 'planner' }: { view?: 'planner' | 'metrics' | 
     </AuthLayout>
   );
 
-  if (user) return view === 'planner' ? <PlannerShell user={user} /> : <InsightsShell user={user} view={view} />;
+  if (user) return view === 'planner' ? <PlannerShell user={user} /> : <InsightsShell user={user} />;
 
   const titles: Record<AuthMode, [string, string]> = {
     signin: ['Tekrar hoş geldin', 'Hesabına giriş yap'],

@@ -2,12 +2,10 @@
 
 import type { User } from '@supabase/supabase-js';
 import Link from 'next/link';
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import styles from './planner-shell.module.css';
 
-type MetricItem = { id: string; name: string; metric_unit: string | null; color: string | null; group_id: string | null };
-type MetricEntry = { id: string; item_id: string; entry_date: string; value: number; note: string | null };
 type Assignment = { id: string; item_id: string; time_slot_id: string; plan_date: string; status: 'planned' | 'done' | 'cancelled' };
 type NameRow = { id: string; name: string; group_id?: string | null };
 
@@ -15,80 +13,20 @@ function isoDate(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
-function Sidebar({ user, active }: { user: User; active: 'metrics' | 'analytics' }) {
+function Sidebar({ user }: { user: User }) {
   const supabase = useMemo(() => createClient(), []);
   return <aside className={styles.sidebar}>
     <div className={styles.brand}><span>M</span> momentum</div>
     <nav className={styles.nav}>
       <Link href="/"><span>◫</span> Bugün</Link>
-      <Link className={active === 'analytics' ? styles.active : ''} href="/analytics"><span>⌁</span> Analitik</Link>
-      <Link className={active === 'metrics' ? styles.active : ''} href="/metrics"><span>◇</span> Metrikler</Link>
+      <Link className={styles.active} href="/analytics"><span>⌁</span> Analitik</Link>
     </nav>
     <div className={styles.sidebarBottom}><div className={styles.profile}><span>{user.email?.slice(0, 2).toUpperCase()}</span><div><strong>{user.email?.split('@')[0]}</strong><button onClick={() => void supabase.auth.signOut()}>Çıkış yap</button></div></div></div>
   </aside>;
 }
 
-export function InsightsShell({ user, view }: { user: User; view: 'metrics' | 'analytics' }) {
-  return <div className={styles.app}><Sidebar user={user} active={view} />{view === 'metrics' ? <Metrics user={user} /> : <Analytics />}</div>;
-}
-
-function Metrics({ user }: { user: User }) {
-  const supabase = useMemo(() => createClient(), []);
-  const [items, setItems] = useState<MetricItem[]>([]);
-  const [entries, setEntries] = useState<MetricEntry[]>([]);
-  const [selected, setSelected] = useState('');
-  const [date, setDate] = useState(() => isoDate(new Date()));
-  const [value, setValue] = useState('');
-  const [note, setNote] = useState('');
-  const [message, setMessage] = useState('');
-
-  const load = useCallback(async () => {
-    const since = new Date(); since.setDate(since.getDate() - 89);
-    const [itemResult, entryResult] = await Promise.all([
-      supabase.from('m_items').select('id,name,metric_unit,color,group_id').eq('kind', 'metric').eq('is_active', true).order('position'),
-      supabase.from('m_metric_entries').select('id,item_id,entry_date,value,note').gte('entry_date', isoDate(since)).order('entry_date'),
-    ]);
-    setItems((itemResult.data ?? []) as MetricItem[]);
-    setEntries((entryResult.data ?? []) as MetricEntry[]);
-    if (!selected && itemResult.data?.[0]) setSelected(itemResult.data[0].id);
-    setMessage(itemResult.error?.message ?? entryResult.error?.message ?? '');
-  }, [selected, supabase]);
-
-  useEffect(() => { queueMicrotask(() => void load()); }, [load]);
-
-  async function save(event: FormEvent) {
-    event.preventDefault();
-    if (!selected || value === '') return;
-    const { error } = await supabase.from('m_metric_entries').upsert({ user_id: user.id, item_id: selected, entry_date: date, value: Number(value), note: note.trim() || null }, { onConflict: 'user_id,item_id,entry_date' });
-    if (error) setMessage(error.message); else { setValue(''); setNote(''); setMessage('Değer kaydedildi.'); await load(); }
-  }
-
-  async function addMetric() {
-    const name = window.prompt('Yeni metriğin adı');
-    if (!name?.trim()) return;
-    const unit = window.prompt('Birim (kg, saat, cm, adet...)', 'kg');
-    const { error } = await supabase.from('m_items').insert({ user_id: user.id, name: name.trim(), kind: 'metric', metric_unit: unit?.trim() || null, position: items.length });
-    if (error) setMessage(error.message); else await load();
-  }
-
-  return <main className={styles.main}>
-    <header className={styles.header}><div><p>Günlük kayıtlar</p><h1>Metrikler.</h1></div><button className={styles.focusButton} onClick={() => void addMetric()}>＋ Yeni metrik</button></header>
-    {message && <button className={styles.notice} onClick={() => setMessage('')}>{message} ×</button>}
-    <section className={styles.metricGrid}>
-      {items.map((item) => {
-        const history = entries.filter((entry) => entry.item_id === item.id);
-        const latest = history.at(-1); const previous = history.at(-2);
-        const values = history.map((entry) => Number(entry.value)); const min = Math.min(...values, 0); const max = Math.max(...values, 1);
-        return <button key={item.id} className={`${styles.metricCard} ${selected === item.id ? styles.metricSelected : ''}`} onClick={() => setSelected(item.id)}>
-          <span>{item.name}</span><strong>{latest?.value ?? '—'} <small>{item.metric_unit}</small></strong>
-          <em>{latest && previous ? `${Number(latest.value) - Number(previous.value) >= 0 ? '+' : ''}${(Number(latest.value) - Number(previous.value)).toFixed(1)} son kayda göre` : 'Henüz karşılaştırma yok'}</em>
-          <div className={styles.sparkBars}>{history.slice(-14).map((entry) => <i key={entry.id} style={{ height: `${18 + ((Number(entry.value) - min) / (max - min || 1)) * 52}%` }} />)}</div>
-        </button>;
-      })}
-      {items.length === 0 && <div className={styles.empty}>İlk metriğini ekleyerek günlük değerlerini takip etmeye başla.</div>}
-    </section>
-    {items.length > 0 && <form className={styles.metricForm} onSubmit={save}><div><span>Yeni kayıt</span><h2>{items.find((item) => item.id === selected)?.name}</h2></div><label>Tarih<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label><label>Değer<input type="number" step="any" required value={value} onChange={(event) => setValue(event.target.value)} /></label><label className={styles.noteField}>Not<input value={note} onChange={(event) => setNote(event.target.value)} placeholder="İsteğe bağlı" /></label><button className={styles.primary}>Kaydet</button></form>}
-  </main>;
+export function InsightsShell({ user }: { user: User }) {
+  return <div className={styles.app}><Sidebar user={user} /><Analytics /></div>;
 }
 
 function Analytics() {
