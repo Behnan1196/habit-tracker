@@ -4,9 +4,10 @@ import type { User } from '@supabase/supabase-js';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { PlannerShell } from './planner-shell';
+import { InsightsShell } from './insights-shell';
 import styles from './planner-shell.module.css';
 
-export function AuthGate() {
+export function AuthGate({ view = 'planner' }: { view?: 'planner' | 'metrics' | 'analytics' }) {
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -33,7 +34,7 @@ export function AuthGate() {
   }
 
   if (user === undefined) return <div className={styles.loading}>Momentum hazırlanıyor…</div>;
-  if (user) return <PlannerShell user={user} />;
+  if (user) return view === 'planner' ? <PlannerShell user={user} /> : <InsightsShell user={user} view={view} />;
 
   return (
     <main className={styles.authPage}>

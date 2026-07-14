@@ -1,6 +1,7 @@
 'use client';
 
 import type { User } from '@supabase/supabase-js';
+import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { ItemKind, PlanStatus } from '@/types/domain';
@@ -185,7 +186,7 @@ export function PlannerShell({ user }: { user: User }) {
   if (loading) return <div className={styles.loading}>Planın yükleniyor…</div>;
 
   return <div className={styles.app}>
-    <aside className={styles.sidebar}><div className={styles.brand}><span>M</span> momentum</div><nav className={styles.nav}><button className={styles.active}><span>◫</span> Bugün</button><button><span>⌁</span> Analitik</button><button><span>◇</span> Metrikler</button></nav><div className={styles.sidebarBottom}><button onClick={() => void addGroup()}><span>＋</span> Yeni grup</button><button><span>⚙</span> Ayarlar</button><div className={styles.profile}><span>{user.email?.slice(0, 2).toUpperCase()}</span><div><strong>{user.user_metadata?.full_name ?? user.email?.split('@')[0]}</strong><button onClick={() => void supabase.auth.signOut()}>Çıkış yap</button></div></div></div></aside>
+    <aside className={styles.sidebar}><div className={styles.brand}><span>M</span> momentum</div><nav className={styles.nav}><Link className={styles.active} href="/"><span>◫</span> Bugün</Link><Link href="/analytics"><span>⌁</span> Analitik</Link><Link href="/metrics"><span>◇</span> Metrikler</Link></nav><div className={styles.sidebarBottom}><button onClick={() => void addGroup()}><span>＋</span> Yeni grup</button><button><span>⚙</span> Ayarlar</button><div className={styles.profile}><span>{user.email?.slice(0, 2).toUpperCase()}</span><div><strong>{user.user_metadata?.full_name ?? user.email?.split('@')[0]}</strong><button onClick={() => void supabase.auth.signOut()}>Çıkış yap</button></div></div></div></aside>
     <main className={styles.main}>
       {error && <button className={styles.errorBanner} onClick={() => setError('')}>{error} ×</button>}
       <header className={styles.header}><div><p>{new Intl.DateTimeFormat('tr-TR', { dateStyle: 'full' }).format(new Date())}</p><h1>Günaydın.</h1></div><button className={styles.focusButton} onClick={() => setFocusOpen(true)}><span className={styles.focusDot} /> Bugünün Planı <b>{planned.length}</b></button></header>
