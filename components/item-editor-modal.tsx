@@ -69,11 +69,14 @@ export function ItemEditorModal({ item, group, initialGroupId, initialKind, grou
       <div className={styles.modalHeader}><div className={styles.header}><div><span className={styles.eyebrow}>{item || group ? 'Düzenleme' : 'Yeni kayıt'}</span><h2 id="editor-title">{group ? 'Grubu düzenle' : item ? 'Item’ı düzenle' : 'Planına ekle'}</h2></div><button className={styles.closeBtn} type="button" onClick={onClose} aria-label="Kapat">×</button></div></div>
       <div className={styles.modalBody}>
         <div className={styles.typeToggle}>
-          <button className={`${styles.typeBtn} ${kind === 'daily' ? styles.active : ''}`} type="button" disabled={!!group} onClick={() => setKind('daily')}><strong>Günlük</strong><small>Gün ve saate planlanır</small></button>
-          <button className={`${styles.typeBtn} ${kind === 'persistent' ? styles.active : ''}`} type="button" disabled={!!group} onClick={() => setKind('persistent')}><strong>Sürekli</strong><small>Bir güne bağlı değildir</small></button>
-          <button className={`${styles.typeBtn} ${kind === 'metric' ? styles.active : ''}`} type="button" disabled={!!group} onClick={() => setKind('metric')}><strong>Metrik</strong><small>Sayısal değer tutulur</small></button>
-          <button className={`${styles.typeBtn} ${kind === 'group' ? styles.active : ''}`} type="button" disabled={!!item} onClick={() => setKind('group')}><strong>Grup</strong><small>Alt kayıtları toplar</small></button>
+          <button className={`${styles.typeBtn} ${kind === 'daily' ? styles.active : ''}`} type="button" onClick={() => setKind('daily')}><strong>Günlük</strong><small>Gün ve saate planlanır</small></button>
+          <button className={`${styles.typeBtn} ${kind === 'persistent' ? styles.active : ''}`} type="button" onClick={() => setKind('persistent')}><strong>Sürekli</strong><small>Bir güne bağlı değildir</small></button>
+          <button className={`${styles.typeBtn} ${kind === 'metric' ? styles.active : ''}`} type="button" onClick={() => setKind('metric')}><strong>Metrik</strong><small>Sayısal değer tutulur</small></button>
+          <button className={`${styles.typeBtn} ${kind === 'group' ? styles.active : ''}`} type="button" onClick={() => setKind('group')}><strong>Grup</strong><small>Alt kayıtları toplar</small></button>
         </div>
+
+        {group && kind !== 'group' && <p className={styles.conversionNote}>Grubun altındaki kayıtlar üst gruba taşınır; bu kayıt seçtiğin item tipine dönüşür.</p>}
+        {item && kind === 'group' && <p className={styles.conversionNote}>Item’ın geçmiş plan ve metrik kayıtları silinir; bu kayıt gruba dönüşür.</p>}
 
         <label className={styles.label} htmlFor="item-name">İsim</label>
         <input id="item-name" className={styles.input} value={name} onChange={(event) => setName(event.target.value)} placeholder={kind === 'group' ? 'Örn. Sağlık' : kind === 'metric' ? 'Örn. Kilo' : 'Örn. Sabah yürüyüşü'} autoFocus />

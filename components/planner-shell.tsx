@@ -125,11 +125,49 @@ export function PlannerShell({ user }: { user: User }) {
   }
 
   async function saveItem(draft: Omit<EditableItem, 'id'>) {
+    if (editor?.group) {
+      const oldGroup = editor.group;
+      const childItemIds = items.filter((item) => item.group_id === oldGroup.id).map((item) => item.id);
+      const childGroupIds = groups.filter((group) => group.parent_id === oldGroup.id).map((group) => group.id);
+      const created = await supabase.from('m_items').insert({ ...draft, user_id: user.id, position: items.length }).select('id').single();
+      if (created.error) return setError(created.error.message);
+
+      const movedItems = childItemIds.length ? await supabase.from('m_items').update({ group_id: draft.group_id }).in('id', childItemIds) : { error: null };
+      if (movedItems.error) {
+        await supabase.from('m_items').delete().eq('id', created.data.id);
+        return setError(movedItems.error.message);
+      }
+      const movedGroups = childGroupIds.length ? await supabase.from('m_groups').update({ parent_id: draft.group_id }).in('id', childGroupIds) : { error: null };
+      if (movedGroups.error) {
+        if (childItemIds.length) await supabase.from('m_items').update({ group_id: oldGroup.id }).in('id', childItemIds);
+        await supabase.from('m_items').delete().eq('id', created.data.id);
+        return setError(movedGroups.error.message);
+      }
+      const removed = await supabase.from('m_groups').delete().eq('id', oldGroup.id);
+      if (removed.error) {
+        if (childGroupIds.length) await supabase.from('m_groups').update({ parent_id: oldGroup.id }).in('id', childGroupIds);
+        if (childItemIds.length) await supabase.from('m_items').update({ group_id: oldGroup.id }).in('id', childItemIds);
+        await supabase.from('m_items').delete().eq('id', created.data.id);
+        return setError(removed.error.message);
+      }
+      setEditor(null); await loadData(); return;
+    }
     const result = editor?.item ? await supabase.from('m_items').update(draft).eq('id', editor.item.id) : await supabase.from('m_items').insert({ ...draft, user_id: user.id, position: items.length });
     if (result.error) setError(result.error.message); else { setEditor(null); await loadData(); }
   }
 
   async function saveGroup(draft: Omit<EditableGroup, 'id'>) {
+    if (editor?.item) {
+      const oldItem = editor.item;
+      const created = await supabase.from('m_groups').insert({ ...draft, user_id: user.id, position: groups.length }).select('id').single();
+      if (created.error) return setError(created.error.message);
+      const removed = await supabase.from('m_items').delete().eq('id', oldItem.id);
+      if (removed.error) {
+        await supabase.from('m_groups').delete().eq('id', created.data.id);
+        return setError(removed.error.message);
+      }
+      setEditor(null); await loadData(); return;
+    }
     const result = editor?.group ? await supabase.from('m_groups').update(draft).eq('id', editor.group.id) : await supabase.from('m_groups').insert({ ...draft, user_id: user.id, position: groups.length });
     if (result.error) setError(result.error.message); else { setEditor(null); await loadData(); }
   }
@@ -211,7 +249,7 @@ export function PlannerShell({ user }: { user: User }) {
   function renderGroup(group: GroupRow, depth = 0): React.ReactNode {
     const groupItems = items.filter((item) => item.group_id === group.id); const children = groups.filter((candidate) => candidate.parent_id === group.id);
     return <section className={styles.calendarGroup} key={group.id} onDragOver={(event) => event.preventDefault()} onDrop={(event) => void moveItem(event.dataTransfer.getData('text/item-id'), group.id)}>
-      <header style={{ paddingLeft: 14 + Math.min(depth * 18, 54) }}><i style={{ background: group.color ?? palette[0] }} /><strong>{group.name}</strong><small>{groupItems.length} item</small><div><button onClick={() => setEditor({ groupId: group.id })}>＋ Item</button><button onClick={() => void addGroup(group.id)}>＋ Grup</button><button onClick={() => void editGroup(group)}>Düzenle</button><button onClick={() => void deleteGroup(group)}>Sil</button></div></header>
+      <header style={{ paddingLeft: 14 + Math.min(depth * 18, 54) }}><i style={{ background: group.color ?? palette[0] }} /><strong>{group.name}</strong><small>{groupItems.length} item</small><div><button aria-label={`${group.name} grubuna ekle`} title="Gruba ekle" onClick={() => setEditor({ groupId: group.id })}>＋</button><button onClick={() => void editGroup(group)}>Düzenle</button></div></header>
       {groupItems.map(renderItem)}{children.map((child) => renderGroup(child, depth + 1))}
     </section>;
   }
