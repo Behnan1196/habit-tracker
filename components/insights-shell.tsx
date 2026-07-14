@@ -1,9 +1,9 @@
 'use client';
 
 import type { User } from '@supabase/supabase-js';
-import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { AppMenu } from './app-menu';
 import styles from './planner-shell.module.css';
 
 type Assignment = { id: string; item_id: string; time_slot_id: string; plan_date: string; status: 'planned' | 'done' | 'cancelled' };
@@ -13,23 +13,11 @@ function isoDate(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
-function Sidebar({ user }: { user: User }) {
-  const supabase = useMemo(() => createClient(), []);
-  return <aside className={styles.sidebar}>
-    <div className={styles.brand}><span>M</span> momentum</div>
-    <nav className={styles.nav}>
-      <Link href="/"><span>◫</span> Bugün</Link>
-      <Link className={styles.active} href="/analytics"><span>⌁</span> Analitik</Link>
-    </nav>
-    <div className={styles.sidebarBottom}><div className={styles.profile}><span>{user.email?.slice(0, 2).toUpperCase()}</span><div><strong>{user.email?.split('@')[0]}</strong><button onClick={() => void supabase.auth.signOut()}>Çıkış yap</button></div></div></div>
-  </aside>;
-}
-
 export function InsightsShell({ user }: { user: User }) {
-  return <div className={styles.app}><Sidebar user={user} /><Analytics /></div>;
+  return <div className={styles.app}><Analytics user={user} /></div>;
 }
 
-function Analytics() {
+function Analytics({ user }: { user: User }) {
   const supabase = useMemo(() => createClient(), []);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [items, setItems] = useState<NameRow[]>([]);
@@ -54,7 +42,7 @@ function Analytics() {
   const groupStats = groups.map((group) => { const ids = items.filter((item) => item.group_id === group.id).map((item) => item.id); const rows = actionable.filter((entry) => ids.includes(entry.item_id)); return { name: group.name, total: rows.length, done: rows.filter((entry) => entry.status === 'done').length }; }).filter((group) => group.total).sort((a, b) => b.total - a.total);
   const slotStats = slots.map((slot) => { const rows = actionable.filter((entry) => entry.time_slot_id === slot.id); return { name: slot.name, total: rows.length, done: rows.filter((entry) => entry.status === 'done').length }; }).filter((slot) => slot.total).sort((a, b) => b.total - a.total);
 
-  return <main className={styles.main}><header className={styles.header}><div><p>Plan ve gerçekleşen</p><h1>Analitik.</h1></div><div className={styles.rangeSwitch}><button className={range === 7 ? styles.activeRange : ''} onClick={() => setRange(7)}>7 gün</button><button className={range === 30 ? styles.activeRange : ''} onClick={() => setRange(30)}>30 gün</button></div></header>
+  return <main className={styles.main}><header className={styles.header}><div><p>Plan ve gerçekleşen</p><h1>Analitik.</h1></div><div className={styles.headerActions}><div className={styles.rangeSwitch}><button className={range === 7 ? styles.activeRange : ''} onClick={() => setRange(7)}>7 gün</button><button className={range === 30 ? styles.activeRange : ''} onClick={() => setRange(30)}>30 gün</button></div><AppMenu user={user} active="analytics" /></div></header>
     <section className={styles.summaryGrid}><div><span>Tamamlanma</span><strong>%{rate}</strong><small>{done.length} / {actionable.length} plan</small></div><div><span>Planlanan</span><strong>{actionable.length}</strong><small>Seçilen dönemde</small></div><div><span>İptal edilen</span><strong>{visible.filter((entry) => entry.status === 'cancelled').length}</strong><small>Geçmişte korunuyor</small></div></section>
     <section className={styles.analyticsCard}><div className={styles.sectionTitle}><div><span>Günlük ritim</span><h2>Tamamlanan planlar</h2></div></div><div className={styles.dayChart}>{days.map((day) => <div key={day.key}><span><i style={{ height: `${day.total ? Math.max(8, day.done / day.total * 100) : 2}%` }} /></span><strong>{day.done}</strong><small>{range === 7 ? day.label : day.key.slice(8)}</small></div>)}</div></section>
     <div className={styles.breakdownGrid}><Breakdown title="Grup performansı" rows={groupStats} /><Breakdown title="Zaman dilimleri" rows={slotStats} /></div>

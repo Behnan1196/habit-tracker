@@ -1,11 +1,11 @@
 'use client';
 
 import type { User } from '@supabase/supabase-js';
-import Link from 'next/link';
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { PlanStatus } from '@/types/domain';
 import { ItemEditorModal, type EditableGroup, type EditableItem } from './item-editor-modal';
+import { AppMenu, type CalendarView } from './app-menu';
 import styles from './planner-shell.module.css';
 
 type GroupRow = { id: string; parent_id: string | null; name: string; color: string | null; position: number };
@@ -42,6 +42,7 @@ export function PlannerShell({ user }: { user: User }) {
   const supabase = useMemo(() => createClient(), []);
   const [selectedDate, setSelectedDate] = useState(() => isoDate(new Date()));
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()));
+  const [view, setView] = useState<CalendarView>('daily');
   const [groups, setGroups] = useState<GroupRow[]>([]);
   const [items, setItems] = useState<ItemRow[]>([]);
   const [slots, setSlots] = useState<SlotRow[]>([]);
@@ -55,6 +56,7 @@ export function PlannerShell({ user }: { user: User }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const weekDates = useMemo(() => Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)), [weekStart]);
+  const visibleDates = view === 'daily' ? [parseDate(selectedDate)] : weekDates;
   const weekEnd = isoDate(weekDates[6]);
   const weekStartKey = isoDate(weekStart);
 
@@ -82,6 +84,28 @@ export function PlannerShell({ user }: { user: User }) {
     void supabase.from('m_profiles').upsert({ id: user.id, display_name: user.user_metadata?.full_name ?? user.email?.split('@')[0] ?? null }, { onConflict: 'id' });
     queueMicrotask(() => void loadData());
   }, [loadData, supabase, user]);
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('view') === 'weekly') queueMicrotask(() => setView('weekly'));
+  }, []);
+
+  function changeView(nextView: CalendarView) {
+    setView(nextView);
+    const url = nextView === 'weekly' ? '/?view=weekly' : '/';
+    window.history.replaceState(null, '', url);
+  }
+
+  function movePeriod(amount: -1 | 1) {
+    if (view === 'daily') {
+      const next = addDays(parseDate(selectedDate), amount);
+      setSelectedDate(isoDate(next));
+      setWeekStart(mondayOf(next));
+      return;
+    }
+    const next = addDays(weekStart, amount * 7);
+    setWeekStart(next);
+    setSelectedDate(isoDate(next));
+  }
 
   const selectedPlanned = assignments.filter((entry) => entry.plan_date === selectedDate && entry.status === 'planned');
 
@@ -171,7 +195,7 @@ export function PlannerShell({ user }: { user: User }) {
     const persistentStatus = persistent.find((state) => state.item_id === item.id)?.status;
     return <div className={`${styles.calendarRow} ${item.kind === 'persistent' ? styles.persistentRow : ''}`} key={item.id} draggable onDragStart={(event) => event.dataTransfer.setData('text/item-id', item.id)}>
       <div className={styles.itemIdentity}><span className={styles.drag}>⠿</span><i style={{ background: item.color ?? palette[0] }} /><button onClick={() => setEditor({ item, groupId: item.group_id })}><strong>{item.name}</strong><small>{item.kind === 'daily' ? 'Günlük' : item.kind === 'metric' ? `Metrik · ${item.metric_unit ?? 'değer'}` : 'Sürekli'}</small></button></div>
-      {item.kind === 'persistent' ? <button className={`${styles.persistentCell} ${persistentStatus === 'done' ? styles.cellDone : persistentStatus === 'planned' ? styles.cellPlanned : ''}`} onClick={() => void cyclePersistent(item)}><span>{persistentStatus === 'done' ? '✓ Yapıldı' : persistentStatus === 'planned' ? 'Planlandı' : 'Boş'}</span><small>Tarihten bağımsız</small></button> : weekDates.map((date) => {
+      {item.kind === 'persistent' ? <button className={`${styles.persistentCell} ${persistentStatus === 'done' ? styles.cellDone : persistentStatus === 'planned' ? styles.cellPlanned : ''}`} onClick={() => void cyclePersistent(item)}><span>{persistentStatus === 'done' ? '✓ Yapıldı' : persistentStatus === 'planned' ? 'Planlandı' : 'Boş'}</span><small>Tarihten bağımsız</small></button> : visibleDates.map((date) => {
         const key = isoDate(date);
         if (item.kind === 'metric') {
           const entry = metrics.find((metric) => metric.item_id === item.id && metric.entry_date === key);
@@ -199,15 +223,14 @@ export function PlannerShell({ user }: { user: User }) {
   if (loading) return <div className={styles.loading}>Planın yükleniyor…</div>;
 
   return <div className={styles.app}>
-    <aside className={styles.sidebar}><div className={styles.brand}><span>M</span> momentum</div><nav className={styles.nav}><Link className={styles.active} href="/"><span>◫</span> Takvim</Link><Link href="/analytics"><span>⌁</span> Analitik</Link></nav><div className={styles.sidebarBottom}><button onClick={() => void addGroup()}><span>＋</span> Yeni grup</button><button><span>⚙</span> Ayarlar</button><div className={styles.profile}><span>{user.email?.slice(0, 2).toUpperCase()}</span><div><strong>{user.user_metadata?.full_name ?? user.email?.split('@')[0]}</strong><button onClick={() => void supabase.auth.signOut()}>Çıkış yap</button></div></div></div></aside>
     <main className={styles.mainWide}>
       {error && <button className={styles.errorBanner} onClick={() => setError('')}>{error} ×</button>}
-      <header className={styles.header}><div><p>Ritmini bul</p><h1>Momentum</h1></div><div className={styles.headerActions}><Link className={styles.analyticsLink} href="/analytics"><span>⌁</span> Analitik</Link><button className={styles.focusButton} onClick={openFocus}><span className={styles.focusDot} /> {focusTitle} <b>{selectedPlanned.length}</b></button></div></header>
-      <section className={styles.weekNav}><button onClick={() => { const next = addDays(weekStart, -7); setWeekStart(next); setSelectedDate(isoDate(next)); }}>‹</button><div><strong>{new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'long' }).format(weekStart)} – {new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }).format(weekDates[6])}</strong><button onClick={() => { const today = new Date(); setWeekStart(mondayOf(today)); setSelectedDate(isoDate(today)); }}>Bugün</button></div><button onClick={() => { const next = addDays(weekStart, 7); setWeekStart(next); setSelectedDate(isoDate(next)); }}>›</button></section>
+      <header className={styles.header}><div><p>Ritmini bul</p><h1>Momentum</h1></div><div className={styles.headerActions}><button className={styles.focusButton} onClick={openFocus}><span className={styles.focusDot} /> {focusTitle} <b>{selectedPlanned.length}</b></button><AppMenu user={user} active="calendar" view={view} onViewChange={changeView} onAddGroup={() => void addGroup()} /></div></header>
+      <section className={styles.weekNav}><button aria-label={view === 'daily' ? 'Önceki gün' : 'Önceki hafta'} onClick={() => movePeriod(-1)}>‹</button><div><strong>{view === 'daily' ? new Intl.DateTimeFormat('tr-TR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(parseDate(selectedDate)) : <>{new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'long' }).format(weekStart)} – {new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }).format(weekDates[6])}</>}</strong><button onClick={() => { const today = new Date(); setWeekStart(mondayOf(today)); setSelectedDate(isoDate(today)); }}>Bugün</button></div><button aria-label={view === 'daily' ? 'Sonraki gün' : 'Sonraki hafta'} onClick={() => movePeriod(1)}>›</button></section>
       <section className={styles.timeline}>{slots.map((slot) => <div key={slot.id}><i style={{ background: slot.color ?? palette[0] }} /><strong>{slot.name}</strong><span>{shortTime(slot.start_time)}–{shortTime(slot.end_time)}</span></div>)}<button onClick={() => void addSlot()}>＋</button></section>
-      <section className={styles.calendarBoard}>
+      <section className={`${styles.calendarBoard} ${view === 'daily' ? styles.dailyView : ''}`}>
         <div className={styles.calendarScroller}>
-          <div className={styles.calendarHead}><div><strong>Itemlar</strong><small>Grup ve rutinlerin</small></div>{weekDates.map((date) => { const key = isoDate(date); return <button key={key} className={selectedDate === key ? styles.selectedDay : ''} onClick={() => setSelectedDate(key)}><span>{new Intl.DateTimeFormat('tr-TR', { weekday: 'short' }).format(date)}</span><strong>{date.getDate()}</strong></button>; })}</div>
+          <div className={styles.calendarHead}><div><strong>Itemlar</strong><small>Grup ve rutinlerin</small></div>{visibleDates.map((date) => { const key = isoDate(date); return <button key={key} className={selectedDate === key ? styles.selectedDay : ''} onClick={() => setSelectedDate(key)}><span>{new Intl.DateTimeFormat('tr-TR', { weekday: 'short' }).format(date)}</span><strong>{date.getDate()}</strong></button>; })}</div>
           <div onDragOver={(event) => event.preventDefault()} onDrop={(event) => void moveItem(event.dataTransfer.getData('text/item-id'), null)}>{groups.filter((group) => group.parent_id === null).map((group) => renderGroup(group))}{items.filter((item) => item.group_id === null).map(renderItem)}{!groups.length && !items.length && <div className={styles.empty}>İlk grubunu veya item’ını ekleyerek başla.</div>}</div>
         </div>
         <button className={styles.addItemButton} onClick={() => setEditor({ groupId: null })}>＋ Grup veya item ekle</button>
