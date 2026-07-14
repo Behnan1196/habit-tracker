@@ -5,10 +5,17 @@
   backdrop-filter: blur(6px);
   z-index: 1000;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: center;
-  padding: 16px;
+  padding: 0;
   animation: fadeIn 0.15s ease;
+}
+
+@media (min-height: 600px) {
+  .overlay {
+    align-items: center;
+    padding: 16px;
+  }
 }
 
 @keyframes fadeIn {
@@ -17,14 +24,43 @@
 }
 
 .modal {
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 24px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 20px 20px 0 0;
   width: 100%;
   max-width: 420px;
+  max-height: 92dvh;
+  display: flex;
+  flex-direction: column;
   animation: slideUp 0.2s ease;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  box-shadow: 0 24px 80px rgba(23, 32, 27, 0.3);
+  overflow: hidden;
+}
+
+@media (min-height: 600px) {
+  .modal {
+    border-radius: 16px;
+    max-height: 88dvh;
+  }
+}
+
+.modalHeader {
+  padding: 20px 24px 0;
+  flex-shrink: 0;
+}
+
+.modalBody {
+  overflow-y: auto;
+  padding: 0 24px;
+  flex: 1;
+  -webkit-overflow-scrolling: touch;
+}
+
+.modalFooter {
+  padding: 12px 24px 20px;
+  flex-shrink: 0;
+  border-top: 1px solid var(--line);
+  background: var(--card);
 }
 
 @keyframes slideUp {
@@ -42,14 +78,14 @@
 .header h2 {
   font-size: 1.1rem;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--ink);
   margin: 0;
 }
 
 .closeBtn {
   background: none;
   border: none;
-  color: var(--text-muted);
+  color: var(--muted);
   font-size: 1.1rem;
   cursor: pointer;
   padding: 4px 8px;
@@ -58,13 +94,13 @@
 }
 
 .closeBtn:hover {
-  color: var(--text-primary);
-  background: var(--surface-3);
+  color: var(--ink);
+  background: var(--paper);
 }
 
 .typeToggle {
   display: flex;
-  background: var(--surface-3);
+  background: var(--paper);
   border-radius: 10px;
   padding: 4px;
   gap: 4px;
@@ -76,7 +112,7 @@
   padding: 8px;
   border: none;
   background: transparent;
-  color: var(--text-muted);
+  color: var(--muted);
   border-radius: 7px;
   font-size: 0.875rem;
   font-weight: 500;
@@ -88,12 +124,13 @@
   background: var(--accent);
   color: #fff;
 }
+.typeBtn { display: grid; gap: 2px; }.typeBtn strong { font-size: .78rem; }.typeBtn small { font-size: .62rem; font-weight: 400; opacity: .75; }
 
 .label {
   display: block;
   font-size: 0.75rem;
   font-weight: 600;
-  color: var(--text-muted);
+  color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin-bottom: 8px;
@@ -102,11 +139,11 @@
 
 .input {
   width: 100%;
-  background: var(--surface-3);
-  border: 1px solid var(--border);
+  background: var(--paper);
+  border: 1px solid var(--line);
   border-radius: 10px;
   padding: 10px 14px;
-  color: var(--text-primary);
+  color: var(--ink);
   font-size: 0.95rem;
   outline: none;
   transition: border-color 0.2s;
@@ -119,11 +156,11 @@
 
 .select {
   width: 100%;
-  background: var(--surface-3);
-  border: 1px solid var(--border);
+  background: var(--paper);
+  border: 1px solid var(--line);
   border-radius: 10px;
   padding: 10px 14px;
-  color: var(--text-primary);
+  color: var(--ink);
   font-size: 0.95rem;
   outline: none;
   cursor: pointer;
@@ -152,16 +189,25 @@
 }
 
 .colorDot.selectedColor {
-  border-color: #fff;
+  border-color: var(--card);
   transform: scale(1.2);
   box-shadow: 0 0 0 2px var(--accent);
 }
 
 .actions {
   display: flex;
+  align-items: center;
   gap: 10px;
-  margin-top: 24px;
-  justify-content: flex-end;
+}.actions > span { flex: 1; }
+.cancelBtn {
+  padding: 10px 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+  background: var(--card);
+  font-size: .875rem;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .deleteBtn {
@@ -201,7 +247,7 @@
   opacity: 0.4;
   cursor: not-allowed;
 }
-.textarea { width: 100%; background: var(--surface-3); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; color: var(--text-primary); font-size: 0.95rem; outline: none; transition: border-color 0.2s; box-sizing: border-box; resize: vertical; font-family: inherit; } .textarea:focus { border-color: var(--accent); }
+.textarea { width: 100%; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; color: var(--ink); font-size: 0.95rem; outline: none; transition: border-color 0.2s; box-sizing: border-box; resize: vertical; font-family: inherit; } .textarea:focus { border-color: var(--accent); }
 
 .checkboxLabel {
   display: flex;
@@ -210,7 +256,7 @@
   margin-top: 14px;
   cursor: pointer;
   font-size: 0.9rem;
-  color: var(--text-primary);
+  color: var(--ink);
   line-height: 1.4;
 }
 
@@ -224,7 +270,9 @@
 }
 
 .checkboxHint {
-  color: var(--text-muted);
+  color: var(--muted);
   font-size: 0.82rem;
 }
+.eyebrow { display: block; margin-bottom: 4px; color: var(--muted); font-size: .65rem; text-transform: uppercase; letter-spacing: .08em; }.fieldGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }.preview { margin: 22px 0 4px; padding: 12px; display: flex; align-items: center; gap: 11px; border: 1px solid var(--line); border-radius: 11px; background: var(--paper); }.preview i { width: 6px; height: 38px; border-radius: 5px; }.preview div { display: grid; }.preview strong { color: var(--ink); font-size: .85rem; }.preview small { margin-top: 2px; color: var(--muted); font-size: .7rem; }
+@media (max-width: 520px) { .fieldGrid { grid-template-columns: 1fr; }.typeToggle { align-items: stretch; }.typeBtn { padding-inline: 5px; }.typeBtn small { display: none; }.actions { gap: 6px; }.cancelBtn, .deleteBtn, .saveBtn { padding-inline: 13px; } }
 

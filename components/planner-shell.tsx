@@ -4,11 +4,12 @@ import type { User } from '@supabase/supabase-js';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import type { ItemKind, PlanStatus } from '@/types/domain';
+import type { PlanStatus } from '@/types/domain';
+import { ItemEditorModal, type EditableItem } from './item-editor-modal';
 import styles from './planner-shell.module.css';
 
 type GroupRow = { id: string; parent_id: string | null; name: string; color: string | null; position: number };
-type ItemRow = { id: string; group_id: string | null; kind: ItemKind; name: string; color: string | null; metric_unit: string | null; position: number };
+type ItemRow = EditableItem & { position: number };
 type SlotRow = { id: string; name: string; start_time: string | null; end_time: string | null; color: string | null; position: number };
 type AssignmentRow = { id: string; item_id: string; time_slot_id: string; status: PlanStatus };
 type PersistentRow = { item_id: string; status: PlanStatus };
@@ -32,6 +33,7 @@ export function PlannerShell({ user }: { user: User }) {
   const [assignments, setAssignments] = useState<AssignmentRow[]>([]);
   const [persistent, setPersistent] = useState<PersistentRow[]>([]);
   const [selectedItem, setSelectedItem] = useState<ItemRow | null>(null);
+  const [editor, setEditor] = useState<{ item?: ItemRow; groupId: string | null } | null>(null);
   const [focusOpen, setFocusOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -40,7 +42,7 @@ export function PlannerShell({ user }: { user: User }) {
   const loadData = useCallback(async () => {
     const [groupResult, itemResult, slotResult, assignmentResult, persistentResult] = await Promise.all([
       supabase.from('m_groups').select('id,parent_id,name,color,position').order('position'),
-      supabase.from('m_items').select('id,group_id,kind,name,color,metric_unit,position').eq('is_active', true).order('position'),
+      supabase.from('m_items').select('id,group_id,kind,name,description,color,metric_unit,position').eq('is_active', true).order('position'),
       supabase.from('m_time_slots').select('id,name,start_time,end_time,color,position').eq('is_active', true).order('position'),
       supabase.from('m_daily_assignments').select('id,item_id,time_slot_id,status').eq('plan_date', today).neq('status', 'cancelled'),
       supabase.from('m_persistent_states').select('item_id,status').neq('status', 'cancelled'),
@@ -92,27 +94,27 @@ export function PlannerShell({ user }: { user: User }) {
   }
 
   async function addItem(groupId: string | null) {
-    const name = window.prompt('Item adı');
-    if (!name?.trim()) return;
-    const rawKind = window.prompt('Tür: daily, persistent veya metric', 'daily');
-    if (!rawKind || !['daily', 'persistent', 'metric'].includes(rawKind)) return;
-    const kind = rawKind as ItemKind;
-    const metricUnit = kind === 'metric' ? window.prompt('Metrik birimi (kg, saat, adet...)', 'kg') : null;
-    const { error: insertError } = await supabase.from('m_items').insert({ user_id: user.id, group_id: groupId, name: name.trim(), kind, metric_unit: metricUnit, position: items.length });
-    if (insertError) setError(insertError.message); else await loadData();
+    setEditor({ groupId });
   }
 
   async function editItem(item: ItemRow) {
-    const name = window.prompt('Item adı', item.name);
-    if (!name?.trim()) return;
-    const { error: updateError } = await supabase.from('m_items').update({ name: name.trim() }).eq('id', item.id);
-    if (updateError) setError(updateError.message); else await loadData();
+    setEditor({ item, groupId: item.group_id });
   }
 
   async function deleteItem(item: ItemRow) {
-    if (!window.confirm(`“${item.name}” silinsin mi?`)) return;
+    if (!window.confirm(`“${item.name}” silinsin mi?`)) return false;
     const { error: deleteError } = await supabase.from('m_items').delete().eq('id', item.id);
-    if (deleteError) setError(deleteError.message); else await loadData();
+    if (deleteError) { setError(deleteError.message); return false; }
+    await loadData();
+    return true;
+  }
+
+  async function saveItem(draft: Omit<EditableItem, 'id'>) {
+    const result = editor?.item
+      ? await supabase.from('m_items').update(draft).eq('id', editor.item.id)
+      : await supabase.from('m_items').insert({ ...draft, user_id: user.id, position: items.length });
+    if (result.error) setError(result.error.message);
+    else { setEditor(null); await loadData(); }
   }
 
   async function addSlot() {
@@ -179,7 +181,7 @@ export function PlannerShell({ user }: { user: User }) {
         <span className={styles.itemName}><strong>{item.name}</strong><small>{label}</small></span>
         {count > 0 && <span className={styles.planBadge}>{count} zaman dilimi</span>}
         {persistentStatus && <span className={styles.planBadge}>{persistentStatus === 'done' ? 'Yapıldı' : 'Planlandı'}</span>}
-      </button><button className={styles.miniAction} onClick={() => void editItem(item)}>Düzenle</button><button className={styles.miniAction} onClick={() => void deleteItem(item)}>Sil</button>
+      </button><button className={styles.miniAction} onClick={() => void editItem(item)}>Düzenle</button>
     </div>;
   }
 
@@ -195,5 +197,6 @@ export function PlannerShell({ user }: { user: User }) {
     </main>
     {selectedItem && <div className={styles.overlay} onMouseDown={() => setSelectedItem(null)}><section className={styles.dialog} role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><div className={styles.dialogTop}><span>Bugüne planla</span><button onClick={() => setSelectedItem(null)}>×</button></div><h2>{selectedItem.name}</h2><p>Bir veya birden fazla zaman dilimi seçebilirsin.</p><div className={styles.slotPicker}>{slots.map((slot) => { const chosen = assignments.some((assignment) => assignment.item_id === selectedItem.id && assignment.time_slot_id === slot.id && assignment.status === 'planned'); return <button key={slot.id} className={chosen ? styles.chosen : ''} onClick={() => void toggleSlot(slot.id)}><i style={{ background: slot.color ?? palette[0] }} /><span><strong>{slot.name}</strong><small>{shortTime(slot.start_time)}–{shortTime(slot.end_time)}</small></span><b>{chosen ? '✓' : ''}</b></button>; })}</div><button className={styles.primary} onClick={() => setSelectedItem(null)}>Tamam</button></section></div>}
     {focusOpen && <div className={styles.overlay} onMouseDown={() => setFocusOpen(false)}><section className={`${styles.dialog} ${styles.focusDialog}`} role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><div className={styles.dialogTop}><span>Bugün</span><button onClick={() => setFocusOpen(false)}>×</button></div><h2>Bugünün Planı</h2><p>{planned.length} planlanmış item seni bekliyor.</p>{focusSlots.map((slot) => <div className={styles.focusSlot} key={slot.id}><header><i style={{ background: slot.color ?? palette[0] }} /><strong>{slot.name}</strong><span>{shortTime(slot.start_time)}–{shortTime(slot.end_time)}</span></header>{slot.entries.map(({ assignment, item }) => <button key={assignment.id} onClick={() => void completeAssignment(assignment.id)}><span className={styles.roundCheck}>✓</span><span><strong>{item?.name}</strong><small>{groups.find((group) => group.id === item?.group_id)?.name ?? 'Grupsuz'}</small></span><em>Planlandı</em></button>)}</div>)}{focusSlots.length === 0 && <div className={styles.empty}>Bugünün planında bekleyen item kalmadı.</div>}</section></div>}
+    {editor && <ItemEditorModal key={editor.item?.id ?? `new-${editor.groupId ?? 'root'}`} item={editor.item} initialGroupId={editor.groupId} groups={groups} onClose={() => setEditor(null)} onSave={saveItem} onDelete={editor.item ? async () => { if (await deleteItem(editor.item!)) setEditor(null); } : undefined} />}
   </div>;
 }
