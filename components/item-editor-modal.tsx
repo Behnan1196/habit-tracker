@@ -16,11 +16,18 @@ export type EditableItem = {
 
 type GroupOption = { id: string; parent_id: string | null; name: string };
 type ItemDraft = Omit<EditableItem, 'id'>;
-export type EditableGroup = GroupOption & { color: string | null };
+export type EditableGroup = GroupOption & { color: string | null; background_color: string | null };
 type GroupDraft = Omit<EditableGroup, 'id'>;
 type EditorKind = ItemKind | 'group';
 
-const colors = ['#395f47', '#638169', '#667e99', '#738aa6', '#8d76a4', '#ad765e', '#c48255', '#b18a4f', '#4f9186', '#747c76'];
+const colors = ['#ffffff', '#111111', '#395f47', '#638169', '#667e99', '#738aa6', '#8d76a4', '#ad765e', '#c48255', '#b18a4f', '#4f9186', '#747c76'];
+const backgroundColors = ['#f4f5f1', ...colors];
+
+function readableText(background: string) {
+  const value = background.replace('#', '');
+  const [red, green, blue] = [value.slice(0, 2), value.slice(2, 4), value.slice(4, 6)].map((part) => Number.parseInt(part, 16));
+  return (red * 299 + green * 587 + blue * 114) / 1000 > 150 ? '#18201a' : '#ffffff';
+}
 
 export function ItemEditorModal({ item, group, initialGroupId, initialKind, groups, onClose, onSave, onSaveGroup, onDelete }: {
   item?: EditableItem;
@@ -37,7 +44,8 @@ export function ItemEditorModal({ item, group, initialGroupId, initialKind, grou
   const [kind, setKind] = useState<EditorKind>(group ? 'group' : item?.kind ?? initialKind ?? 'daily');
   const [description, setDescription] = useState(item?.description ?? '');
   const [groupId, setGroupId] = useState(group?.parent_id ?? item?.group_id ?? initialGroupId);
-  const [color, setColor] = useState(group?.color ?? item?.color ?? colors[0]);
+  const [color, setColor] = useState(group?.color ?? item?.color ?? colors[2]);
+  const [backgroundColor, setBackgroundColor] = useState(group?.background_color ?? '#f4f5f1');
   const [metricUnit, setMetricUnit] = useState(item?.metric_unit ?? '');
   const [busy, setBusy] = useState(false);
 
@@ -59,7 +67,7 @@ export function ItemEditorModal({ item, group, initialGroupId, initialKind, grou
     event.preventDefault();
     if (!name.trim()) return;
     setBusy(true);
-    if (kind === 'group') await onSaveGroup({ name: name.trim(), parent_id: groupId, color });
+    if (kind === 'group') await onSaveGroup({ name: name.trim(), parent_id: groupId, color, background_color: backgroundColor });
     else await onSave({ name: name.trim(), kind, description: description.trim() || null, group_id: groupId, color, metric_unit: kind === 'metric' ? metricUnit.trim() || null : null });
     setBusy(false);
   }
@@ -90,7 +98,8 @@ export function ItemEditorModal({ item, group, initialGroupId, initialKind, grou
 
         <label className={styles.label}>Renk</label>
         <div className={styles.colorGrid}>{colors.map((option) => <button key={option} type="button" aria-label={`Renk ${option}`} className={`${styles.colorDot} ${color === option ? styles.selectedColor : ''}`} style={{ background: option }} onClick={() => setColor(option)} />)}</div>
-        <div className={styles.preview}><i style={{ background: color }} /><div><strong>{name.trim() || 'Önizleme'}</strong><small>{kind === 'group' ? 'Grup başlığı' : kind === 'daily' ? 'Günlük item' : kind === 'persistent' ? 'Sürekli item' : `Metrik${metricUnit ? ` · ${metricUnit}` : ''}`}</small></div></div>
+        {kind === 'group' && <><label className={styles.label}>Arka plan</label><div className={styles.colorGrid}>{backgroundColors.map((option) => <button key={option} type="button" aria-label={`Arka plan ${option}`} className={`${styles.colorDot} ${backgroundColor === option ? styles.selectedColor : ''}`} style={{ background: option }} onClick={() => setBackgroundColor(option)} />)}</div></>}
+        <div className={styles.preview} style={kind === 'group' ? { background: backgroundColor, color: readableText(backgroundColor) } : undefined}><i style={{ background: color }} /><div><strong>{name.trim() || 'Önizleme'}</strong><small>{kind === 'group' ? 'Grup başlığı' : kind === 'daily' ? 'Günlük item' : kind === 'persistent' ? 'Sürekli item' : `Metrik${metricUnit ? ` · ${metricUnit}` : ''}`}</small></div></div>
       </div>
       <div className={styles.modalFooter}><div className={styles.actions}>{(item || group) && onDelete && <button className={styles.deleteBtn} type="button" disabled={busy} onClick={() => void onDelete()}>Sil</button>}<span /><button className={styles.cancelBtn} type="button" onClick={onClose}>Vazgeç</button><button className={styles.saveBtn} disabled={busy || !name.trim()}>{busy ? 'Kaydediliyor…' : 'Kaydet'}</button></div></div>
     </form>

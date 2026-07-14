@@ -8,7 +8,7 @@ import { ItemEditorModal, type EditableGroup, type EditableItem } from './item-e
 import { AppMenu, type CalendarView } from './app-menu';
 import styles from './planner-shell.module.css';
 
-type GroupRow = { id: string; parent_id: string | null; name: string; color: string | null; position: number };
+type GroupRow = { id: string; parent_id: string | null; name: string; color: string | null; background_color: string | null; position: number };
 type ItemRow = EditableItem & { position: number };
 type SlotRow = { id: string; name: string; start_time: string | null; end_time: string | null; color: string | null; position: number; is_active: boolean };
 type AssignmentRow = { id: string; item_id: string; time_slot_id: string; plan_date: string; status: PlanStatus };
@@ -38,6 +38,12 @@ function addDays(date: Date, amount: number) {
 
 function shortTime(value: string | null) { return value?.slice(0, 5) ?? '—'; }
 
+function readableText(background: string) {
+  const value = background.replace('#', '');
+  const [red, green, blue] = [value.slice(0, 2), value.slice(2, 4), value.slice(4, 6)].map((part) => Number.parseInt(part, 16));
+  return (red * 299 + green * 587 + blue * 114) / 1000 > 150 ? '#18201a' : '#ffffff';
+}
+
 export function PlannerShell({ user }: { user: User }) {
   const supabase = useMemo(() => createClient(), []);
   const [selectedDate, setSelectedDate] = useState(() => isoDate(new Date()));
@@ -63,7 +69,7 @@ export function PlannerShell({ user }: { user: User }) {
 
   const loadData = useCallback(async () => {
     const [groupResult, itemResult, slotResult, assignmentResult, persistentResult, metricResult] = await Promise.all([
-      supabase.from('m_groups').select('id,parent_id,name,color,position').order('position'),
+      supabase.from('m_groups').select('id,parent_id,name,color,background_color,position').order('position'),
       supabase.from('m_items').select('id,group_id,kind,name,description,color,metric_unit,position').eq('is_active', true).order('position'),
       supabase.from('m_time_slots').select('id,name,start_time,end_time,color,position,is_active').order('position'),
       supabase.from('m_daily_assignments').select('id,item_id,time_slot_id,plan_date,status').gte('plan_date', weekStartKey).lte('plan_date', weekEnd).neq('status', 'cancelled'),
@@ -258,7 +264,7 @@ export function PlannerShell({ user }: { user: User }) {
   function renderGroup(group: GroupRow, depth = 0): React.ReactNode {
     const groupItems = items.filter((item) => item.group_id === group.id); const children = groups.filter((candidate) => candidate.parent_id === group.id);
     return <section className={styles.calendarGroup} key={group.id} onDragOver={(event) => event.preventDefault()} onDrop={(event) => void moveItem(event.dataTransfer.getData('text/item-id'), group.id)}>
-      <header style={{ paddingLeft: 10 + Math.min(depth * 12, 36) }}><i style={{ background: group.color ?? palette[0] }} /><button className={styles.groupTitle} onClick={() => void editGroup(group)}>{group.name}</button><small>{groupItems.length}</small><div><button aria-label={`${group.name} grubuna ekle`} title="Gruba ekle" onClick={() => setEditor({ groupId: group.id })}>＋</button></div></header>
+      <header style={{ paddingLeft: 10 + Math.min(depth * 12, 36), background: group.background_color ?? '#f4f5f1', color: readableText(group.background_color ?? '#f4f5f1') }}><i style={{ background: group.color ?? palette[0] }} /><button className={styles.groupTitle} onClick={() => void editGroup(group)}>{group.name}</button><small>{groupItems.length}</small><div><button aria-label={`${group.name} grubuna ekle`} title="Gruba ekle" onClick={() => setEditor({ groupId: group.id })}>＋</button></div></header>
       {groupItems.map(renderItem)}{children.map((child) => renderGroup(child, depth + 1))}
     </section>;
   }

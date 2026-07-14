@@ -185,6 +185,7 @@
   cursor: pointer;
   transition: transform 0.15s, border-color 0.15s;
   flex-shrink: 0;
+  box-shadow: 0 0 0 1px var(--line);
 }
 
 .colorDot:hover {
@@ -276,6 +277,6 @@
   color: var(--muted);
   font-size: 0.82rem;
 }
-.eyebrow { display: block; margin-bottom: 4px; color: var(--muted); font-size: .65rem; text-transform: uppercase; letter-spacing: .08em; }.fieldGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }.preview { margin: 22px 0 4px; padding: 12px; display: flex; align-items: center; gap: 11px; border: 1px solid var(--line); border-radius: 11px; background: var(--paper); }.preview i { width: 6px; height: 38px; border-radius: 5px; }.preview div { display: grid; }.preview strong { color: var(--ink); font-size: .85rem; }.preview small { margin-top: 2px; color: var(--muted); font-size: .7rem; }
+.eyebrow { display: block; margin-bottom: 4px; color: var(--muted); font-size: .65rem; text-transform: uppercase; letter-spacing: .08em; }.fieldGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }.preview { margin: 22px 0 4px; padding: 12px; display: flex; align-items: center; gap: 11px; border: 1px solid var(--line); border-radius: 11px; background: var(--paper); }.preview i { width: 6px; height: 38px; border-radius: 5px; }.preview div { display: grid; }.preview strong { color: inherit; font-size: .85rem; }.preview small { margin-top: 2px; color: inherit; font-size: .7rem; opacity: .7; }
 @media (max-width: 520px) { .fieldGrid { grid-template-columns: 1fr; }.typeToggle { align-items: stretch; }.typeBtn { padding-inline: 5px; }.typeBtn small { display: none; }.actions { gap: 6px; }.cancelBtn, .deleteBtn, .saveBtn { padding-inline: 13px; } }
 
