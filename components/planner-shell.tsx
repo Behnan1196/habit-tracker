@@ -65,6 +65,7 @@ export function PlannerShell({ user }: { user: User }) {
   const [durationTarget, setDurationTarget] = useState<AssignmentRow | null>(null);
   const [slotManagerOpen, setSlotManagerOpen] = useState(false);
   const [noteEditor, setNoteEditor] = useState<{ groupId: string; note?: NoteRow } | null>(null);
+  const [groupPlanTarget, setGroupPlanTarget] = useState<GroupRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const weekDates = useMemo(() => Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)), [weekStart]);
@@ -273,6 +274,32 @@ export function PlannerShell({ user }: { user: User }) {
     if (result.error) setError(result.error.message); else await loadData();
   }
 
+  function plannableItemsForGroup(groupId: string): ItemRow[] {
+    const groupIds = new Set<string>([groupId]);
+    let added = true;
+    while (added) {
+      added = false;
+      groups.forEach((group) => {
+        if (group.content_type === 'standard' && group.parent_id && groupIds.has(group.parent_id) && !groupIds.has(group.id)) { groupIds.add(group.id); added = true; }
+      });
+    }
+    return items.filter((item) => item.group_id && groupIds.has(item.group_id) && item.kind !== 'metric');
+  }
+
+  async function planGroup(group: GroupRow, slotId: string) {
+    const candidates = plannableItemsForGroup(group.id);
+    const now = new Date().toISOString();
+    const daily = candidates.filter((item) => item.kind === 'daily').map((item) => ({ user_id: user.id, item_id: item.id, time_slot_id: slotId, plan_date: selectedDate, status: 'planned', planned_at: now, completed_at: null, cancelled_at: null }));
+    const fixed = candidates.filter((item) => item.kind === 'persistent').map((item) => ({ user_id: user.id, item_id: item.id, time_slot_id: slotId, status: 'planned', planned_at: now, completed_at: null, cancelled_at: null }));
+    const [dailyResult, fixedResult] = await Promise.all([
+      daily.length ? supabase.from('m_daily_assignments').upsert(daily, { onConflict: 'user_id,item_id,time_slot_id,plan_date' }) : Promise.resolve({ error: null }),
+      fixed.length ? supabase.from('m_persistent_states').upsert(fixed, { onConflict: 'item_id' }) : Promise.resolve({ error: null }),
+    ]);
+    const planError = dailyResult.error ?? fixedResult.error;
+    if (planError) { setError(planError.message); return false; }
+    setGroupPlanTarget(null); await loadData(); return true;
+  }
+
   async function saveMetric(value: number, note: string) {
     if (!metricTarget) return;
     const { error: upsertError } = await supabase.from('m_metric_entries').upsert({ user_id: user.id, item_id: metricTarget.item.id, entry_date: metricTarget.date, value, note: note.trim() || null }, { onConflict: 'user_id,item_id,entry_date' });
@@ -305,8 +332,9 @@ export function PlannerShell({ user }: { user: User }) {
   function renderGroup(group: GroupRow, depth = 0): React.ReactNode {
     const groupItems = items.filter((item) => item.group_id === group.id); const children = groups.filter((candidate) => candidate.parent_id === group.id);
     const moduleNotes = notes.filter((note) => note.group_id === group.id);
+    const plannableCount = group.content_type === 'standard' ? plannableItemsForGroup(group.id).length : 0;
     return <section className={styles.calendarGroup} key={group.id} onDragOver={(event) => event.preventDefault()} onDrop={(event) => void moveItem(event.dataTransfer.getData('text/item-id'), group.id)}>
-      <header style={{ paddingLeft: 10 + Math.min(depth * 12, 36), background: group.background_color ?? '#f4f5f1', color: readableText(group.background_color ?? '#f4f5f1') }}><i style={{ background: group.color ?? palette[0] }} /><button className={styles.groupTitle} onClick={() => void editGroup(group)}>{group.name}</button><small>{group.content_type === 'module' ? moduleNotes.length : groupItems.length}</small><div>{group.content_type === 'standard' ? <button aria-label={`${group.name} grubuna ekle`} title="Gruba ekle" onClick={() => setEditor({ groupId: group.id, initialKind: defaultKindForGroup(group.id) })}>＋</button> : group.module_key === 'notes' ? <button aria-label={`${group.name} grubuna not ekle`} title="Not ekle" onClick={() => setNoteEditor({ groupId: group.id })}>＋</button> : null}</div></header>
+      <header style={{ paddingLeft: 10 + Math.min(depth * 12, 36), background: group.background_color ?? '#f4f5f1', color: readableText(group.background_color ?? '#f4f5f1') }}><i style={{ background: group.color ?? palette[0] }} /><button className={styles.groupTitle} onClick={() => void editGroup(group)}>{group.name}</button><small>{group.content_type === 'module' ? moduleNotes.length : groupItems.length}</small><div>{group.content_type === 'standard' && plannableCount > 0 && <button aria-label={`${group.name} grubunu Ajandaya ekle`} title={`${plannableCount} itemı Ajandaya ekle`} onClick={() => setGroupPlanTarget(group)}>▤</button>}{group.content_type === 'standard' ? <button aria-label={`${group.name} grubuna ekle`} title="Gruba ekle" onClick={() => setEditor({ groupId: group.id, initialKind: defaultKindForGroup(group.id) })}>＋</button> : group.module_key === 'notes' ? <button aria-label={`${group.name} grubuna not ekle`} title="Not ekle" onClick={() => setNoteEditor({ groupId: group.id })}>＋</button> : null}</div></header>
       {group.content_type === 'module' && group.module_key === 'notes' ? <NotesModule notes={moduleNotes} onOpen={(note) => setNoteEditor({ groupId: group.id, note })} onAdd={() => setNoteEditor({ groupId: group.id })} /> : <>{groupItems.map((item) => renderItem(item, depth + 1))}{children.map((child) => renderGroup(child, depth + 1))}</>}
     </section>;
   }
@@ -338,9 +366,17 @@ export function PlannerShell({ user }: { user: User }) {
     {metricTarget && <MetricEntryModal target={metricTarget} onClose={() => setMetricTarget(null)} onSave={saveMetric} />}
     {focusSnapshot && <div className={styles.overlay} onMouseDown={() => setFocusSnapshot(null)}><section className={`${styles.dialog} ${styles.focusDialog}`} role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><div className={styles.dialogTop}><span>{new Intl.DateTimeFormat('tr-TR', { dateStyle: 'long' }).format(parseDate(selectedDate))}</span><button onClick={() => setFocusSnapshot(null)}>×</button></div><h2>{agendaTitle}</h2><p>{focusSnapshot.filter((entry) => entry.status === 'planned').length} item seni bekliyor.</p>{focusSlots.map((slot) => <div className={styles.focusSlot} key={slot.id}><header><i style={{ background: slot.color ?? palette[0] }} /><strong>{slot.name}</strong><span>{shortTime(slot.start_time)}–{shortTime(slot.end_time)}</span></header>{slot.entries.map((entry) => { const item = items.find((candidate) => candidate.id === entry.item_id); return <button key={entry.id} className={entry.status === 'done' ? styles.focusDone : ''} onClick={() => { if (entry.status !== 'planned') return; if (entry.source === 'daily' && (item?.activity_tag || item?.estimated_minutes)) setDurationTarget(entry); else void completeAssignment(entry); }}><span className={styles.roundCheck}>{entry.status === 'done' ? '✓' : ''}</span><span><strong>{item?.name}</strong><small>{item?.activity_tag ? `${item.activity_tag}${item.estimated_minutes ? ` · ${item.estimated_minutes} dk` : ''}` : groups.find((group) => group.id === item?.group_id)?.name ?? 'Grupsuz'}</small></span><em>{entry.status === 'done' ? entry.actual_duration_minutes ? `${entry.actual_duration_minutes} dk` : 'Yapıldı' : 'Planlandı'}</em></button>; })}</div>)}{!focusSlots.length && <div className={styles.empty}>Bu gün için planlanmış item yok.</div>}</section></div>}
     {durationTarget && <DurationCompletionModal entry={durationTarget} item={items.find((item) => item.id === durationTarget.item_id)!} onClose={() => setDurationTarget(null)} onComplete={async (minutes) => { await completeAssignment(durationTarget, minutes); setDurationTarget(null); }} />}
+    {groupPlanTarget && <GroupPlanModal group={groupPlanTarget} itemCount={plannableItemsForGroup(groupPlanTarget.id).length} slots={activeSlots} date={selectedDate} onClose={() => setGroupPlanTarget(null)} onPlan={(slotId) => planGroup(groupPlanTarget, slotId)} />}
     {noteEditor && <NoteEditorModal note={noteEditor.note} onClose={() => setNoteEditor(null)} onSave={saveNote} onDelete={noteEditor.note ? () => deleteNote(noteEditor.note!) : undefined} />}
     {editor && <ItemEditorModal key={editor.item?.id ?? editor.group?.id ?? `new-${editor.initialKind ?? 'item'}-${editor.groupId ?? 'root'}`} item={editor.item} group={editor.group} initialKind={editor.initialKind} initialGroupId={editor.groupId} groups={groups} activityTags={Array.from(new Set(items.map((item) => item.activity_tag).filter((tag): tag is string => !!tag))).sort((a, b) => a.localeCompare(b, 'tr'))} onClose={() => setEditor(null)} onSave={saveItem} onSaveGroup={saveGroup} onDelete={editor.item ? async () => { if (await deleteItem(editor.item!)) setEditor(null); } : editor.group ? async () => { if (await deleteGroup(editor.group!)) setEditor(null); } : undefined} />}
   </div>;
+}
+
+function GroupPlanModal({ group, itemCount, slots, date, onClose, onPlan }: { group: GroupRow; itemCount: number; slots: SlotRow[]; date: string; onClose: () => void; onPlan: (slotId: string) => Promise<boolean> }) {
+  const [slotId, setSlotId] = useState('');
+  const [busy, setBusy] = useState(false);
+  async function submit() { if (!slotId) return; setBusy(true); await onPlan(slotId); setBusy(false); }
+  return <div className={styles.overlay} onMouseDown={onClose}><section className={styles.dialog} role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><div className={styles.dialogTop}><span>{new Intl.DateTimeFormat('tr-TR', { dateStyle: 'long' }).format(parseDate(date))}</span><button onClick={onClose}>×</button></div><h2>{group.name}</h2><p>{itemCount} itemı Ajandaya eklemek için bir zaman dilimi seç.</p><div className={styles.slotPicker}>{slots.map((slot) => <button key={slot.id} className={slotId === slot.id ? styles.chosen : ''} onClick={() => setSlotId(slot.id)}><i style={{ background: slot.color ?? palette[0] }} /><span><strong>{slot.name}</strong><small>{shortTime(slot.start_time)}–{shortTime(slot.end_time)}</small></span><b>{slotId === slot.id ? '✓' : ''}</b></button>)}</div><button className={styles.primary} disabled={!slotId || busy} onClick={() => void submit()}>{busy ? 'Ekleniyor…' : 'Ajandaya ekle'}</button></section></div>;
 }
 
 function NotesModule({ notes, onOpen, onAdd }: { notes: NoteRow[]; onOpen: (note: NoteRow) => void; onAdd: () => void }) {
