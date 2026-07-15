@@ -11,7 +11,7 @@ import styles from './planner-shell.module.css';
 type GroupRow = { id: string; parent_id: string | null; name: string; color: string | null; background_color: string | null; position: number };
 type ItemRow = EditableItem & { position: number };
 type SlotRow = { id: string; name: string; start_time: string | null; end_time: string | null; color: string | null; position: number; is_active: boolean };
-type AssignmentRow = { id: string; item_id: string; time_slot_id: string; plan_date: string; status: PlanStatus; source?: 'daily' | 'persistent' };
+type AssignmentRow = { id: string; item_id: string; time_slot_id: string; plan_date: string; status: PlanStatus; actual_duration_minutes: number | null; source?: 'daily' | 'persistent' };
 type PersistentRow = { item_id: string; status: PlanStatus; time_slot_id: string | null };
 type MetricRow = { id: string; item_id: string; entry_date: string; value: number; note: string | null };
 
@@ -60,6 +60,7 @@ export function PlannerShell({ user }: { user: User }) {
   const [metricTarget, setMetricTarget] = useState<{ item: ItemRow; date: string; entry?: MetricRow } | null>(null);
   const [editor, setEditor] = useState<{ item?: ItemRow; group?: GroupRow; groupId: string | null; initialKind?: 'group' } | null>(null);
   const [focusSnapshot, setFocusSnapshot] = useState<AssignmentRow[] | null>(null);
+  const [durationTarget, setDurationTarget] = useState<AssignmentRow | null>(null);
   const [slotManagerOpen, setSlotManagerOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -71,9 +72,9 @@ export function PlannerShell({ user }: { user: User }) {
   const loadData = useCallback(async () => {
     const [groupResult, itemResult, slotResult, assignmentResult, persistentResult, metricResult] = await Promise.all([
       supabase.from('m_groups').select('id,parent_id,name,color,background_color,position').order('position'),
-      supabase.from('m_items').select('id,group_id,kind,name,description,color,metric_unit,metric_period,position').eq('is_active', true).order('position'),
+      supabase.from('m_items').select('id,group_id,kind,name,description,color,metric_unit,metric_period,activity_tag,estimated_minutes,position').eq('is_active', true).order('position'),
       supabase.from('m_time_slots').select('id,name,start_time,end_time,color,position,is_active').order('position'),
-      supabase.from('m_daily_assignments').select('id,item_id,time_slot_id,plan_date,status').gte('plan_date', weekStartKey).lte('plan_date', weekEnd).neq('status', 'cancelled'),
+      supabase.from('m_daily_assignments').select('id,item_id,time_slot_id,plan_date,status,actual_duration_minutes').gte('plan_date', weekStartKey).lte('plan_date', weekEnd).neq('status', 'cancelled'),
       supabase.from('m_persistent_states').select('item_id,status,time_slot_id').neq('status', 'cancelled'),
       supabase.from('m_metric_entries').select('id,item_id,entry_date,value,note').gte('entry_date', weekStartKey).lte('entry_date', weekEnd),
     ]);
@@ -217,15 +218,16 @@ export function PlannerShell({ user }: { user: User }) {
     await loadData();
   }
 
-  async function completeAssignment(entry: AssignmentRow) {
+  async function completeAssignment(entry: AssignmentRow, actualMinutes?: number) {
     const table = entry.source === 'persistent' ? 'm_persistent_states' : 'm_daily_assignments';
     const key = entry.source === 'persistent' ? 'item_id' : 'id';
     const value = entry.source === 'persistent' ? entry.item_id : entry.id;
-    const { error: updateError } = await supabase.from(table).update({ status: 'done', completed_at: new Date().toISOString(), cancelled_at: null }).eq(key, value);
+    const completion = entry.source === 'persistent' ? { status: 'done', completed_at: new Date().toISOString(), cancelled_at: null } : { status: 'done', completed_at: new Date().toISOString(), cancelled_at: null, actual_duration_minutes: actualMinutes ?? null };
+    const { error: updateError } = await supabase.from(table).update(completion).eq(key, value);
     if (updateError) return setError(updateError.message);
-    setFocusSnapshot((current) => current?.map((candidate) => candidate.id === entry.id ? { ...candidate, status: 'done' } : candidate) ?? null);
+    setFocusSnapshot((current) => current?.map((candidate) => candidate.id === entry.id ? { ...candidate, status: 'done', actual_duration_minutes: actualMinutes ?? candidate.actual_duration_minutes } : candidate) ?? null);
     if (entry.source === 'persistent') setPersistent((current) => current.map((state) => state.item_id === entry.item_id ? { ...state, status: 'done' } : state));
-    else setAssignments((current) => current.map((candidate) => candidate.id === entry.id ? { ...candidate, status: 'done' } : candidate));
+    else setAssignments((current) => current.map((candidate) => candidate.id === entry.id ? { ...candidate, status: 'done', actual_duration_minutes: actualMinutes ?? null } : candidate));
   }
 
   async function setPersistentSlot(slotId: string) {
@@ -275,7 +277,7 @@ export function PlannerShell({ user }: { user: User }) {
   }
 
   function openFocus() {
-    const fixedEntries: AssignmentRow[] = fixedPlanned.map((entry) => ({ id: `persistent-${entry.item_id}`, item_id: entry.item_id, time_slot_id: entry.time_slot_id!, plan_date: selectedDate, status: entry.status, source: 'persistent' }));
+    const fixedEntries: AssignmentRow[] = fixedPlanned.map((entry) => ({ id: `persistent-${entry.item_id}`, item_id: entry.item_id, time_slot_id: entry.time_slot_id!, plan_date: selectedDate, status: entry.status, actual_duration_minutes: null, source: 'persistent' }));
     setFocusSnapshot([...selectedPlanned.map((entry) => ({ ...entry, source: 'daily' as const })), ...fixedEntries]);
   }
   const focusTitle = selectedDate === isoDate(new Date()) ? 'Bugünün Planı' : `${new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'long' }).format(parseDate(selectedDate))} Planı`;
@@ -299,9 +301,17 @@ export function PlannerShell({ user }: { user: User }) {
     {persistentTarget && <div className={styles.overlay} onMouseDown={() => setPersistentTarget(null)}><section className={styles.dialog} role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><div className={styles.dialogTop}><span>Sabit item</span><button onClick={() => setPersistentTarget(null)}>×</button></div><h2>{persistentTarget.name}</h2><p>Focus’ta görüneceği zaman dilimini seç.</p><div className={styles.slotPicker}>{activeSlots.map((slot) => { const state = persistent.find((entry) => entry.item_id === persistentTarget.id); const chosen = state?.status === 'planned' && state.time_slot_id === slot.id; return <button key={slot.id} className={chosen ? styles.chosen : ''} onClick={() => void setPersistentSlot(slot.id)}><i style={{ background: slot.color ?? palette[0] }} /><span><strong>{slot.name}</strong><small>{shortTime(slot.start_time)}–{shortTime(slot.end_time)}</small></span><b>{chosen ? '✓' : ''}</b></button>; })}</div><button className={styles.primary} onClick={() => setPersistentTarget(null)}>Tamam</button></section></div>}
     {slotManagerOpen && <TimeSlotManager slots={activeSlots} onClose={() => setSlotManagerOpen(false)} onSave={saveSlot} onDelete={archiveSlot} />}
     {metricTarget && <MetricEntryModal target={metricTarget} onClose={() => setMetricTarget(null)} onSave={saveMetric} />}
-    {focusSnapshot && <div className={styles.overlay} onMouseDown={() => setFocusSnapshot(null)}><section className={`${styles.dialog} ${styles.focusDialog}`} role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><div className={styles.dialogTop}><span>{new Intl.DateTimeFormat('tr-TR', { dateStyle: 'long' }).format(parseDate(selectedDate))}</span><button onClick={() => setFocusSnapshot(null)}>×</button></div><h2>{focusTitle}</h2><p>{focusSnapshot.filter((entry) => entry.status === 'planned').length} item seni bekliyor.</p>{focusSlots.map((slot) => <div className={styles.focusSlot} key={slot.id}><header><i style={{ background: slot.color ?? palette[0] }} /><strong>{slot.name}</strong><span>{shortTime(slot.start_time)}–{shortTime(slot.end_time)}</span></header>{slot.entries.map((entry) => { const item = items.find((candidate) => candidate.id === entry.item_id); return <button key={entry.id} className={entry.status === 'done' ? styles.focusDone : ''} onClick={() => entry.status === 'planned' && void completeAssignment(entry)}><span className={styles.roundCheck}>{entry.status === 'done' ? '✓' : ''}</span><span><strong>{item?.name}</strong><small>{groups.find((group) => group.id === item?.group_id)?.name ?? 'Grupsuz'}</small></span><em>{entry.status === 'done' ? 'Yapıldı' : 'Planlandı'}</em></button>; })}</div>)}{!focusSlots.length && <div className={styles.empty}>Bu gün için planlanmış item yok.</div>}</section></div>}
-    {editor && <ItemEditorModal key={editor.item?.id ?? editor.group?.id ?? `new-${editor.initialKind ?? 'item'}-${editor.groupId ?? 'root'}`} item={editor.item} group={editor.group} initialKind={editor.initialKind} initialGroupId={editor.groupId} groups={groups} onClose={() => setEditor(null)} onSave={saveItem} onSaveGroup={saveGroup} onDelete={editor.item ? async () => { if (await deleteItem(editor.item!)) setEditor(null); } : editor.group ? async () => { if (await deleteGroup(editor.group!)) setEditor(null); } : undefined} />}
+    {focusSnapshot && <div className={styles.overlay} onMouseDown={() => setFocusSnapshot(null)}><section className={`${styles.dialog} ${styles.focusDialog}`} role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><div className={styles.dialogTop}><span>{new Intl.DateTimeFormat('tr-TR', { dateStyle: 'long' }).format(parseDate(selectedDate))}</span><button onClick={() => setFocusSnapshot(null)}>×</button></div><h2>{focusTitle}</h2><p>{focusSnapshot.filter((entry) => entry.status === 'planned').length} item seni bekliyor.</p>{focusSlots.map((slot) => <div className={styles.focusSlot} key={slot.id}><header><i style={{ background: slot.color ?? palette[0] }} /><strong>{slot.name}</strong><span>{shortTime(slot.start_time)}–{shortTime(slot.end_time)}</span></header>{slot.entries.map((entry) => { const item = items.find((candidate) => candidate.id === entry.item_id); return <button key={entry.id} className={entry.status === 'done' ? styles.focusDone : ''} onClick={() => { if (entry.status !== 'planned') return; if (entry.source === 'daily' && (item?.activity_tag || item?.estimated_minutes)) setDurationTarget(entry); else void completeAssignment(entry); }}><span className={styles.roundCheck}>{entry.status === 'done' ? '✓' : ''}</span><span><strong>{item?.name}</strong><small>{item?.activity_tag ? `${item.activity_tag}${item.estimated_minutes ? ` · ${item.estimated_minutes} dk` : ''}` : groups.find((group) => group.id === item?.group_id)?.name ?? 'Grupsuz'}</small></span><em>{entry.status === 'done' ? entry.actual_duration_minutes ? `${entry.actual_duration_minutes} dk` : 'Yapıldı' : 'Planlandı'}</em></button>; })}</div>)}{!focusSlots.length && <div className={styles.empty}>Bu gün için planlanmış item yok.</div>}</section></div>}
+    {durationTarget && <DurationCompletionModal entry={durationTarget} item={items.find((item) => item.id === durationTarget.item_id)!} onClose={() => setDurationTarget(null)} onComplete={async (minutes) => { await completeAssignment(durationTarget, minutes); setDurationTarget(null); }} />}
+    {editor && <ItemEditorModal key={editor.item?.id ?? editor.group?.id ?? `new-${editor.initialKind ?? 'item'}-${editor.groupId ?? 'root'}`} item={editor.item} group={editor.group} initialKind={editor.initialKind} initialGroupId={editor.groupId} groups={groups} activityTags={Array.from(new Set(items.map((item) => item.activity_tag).filter((tag): tag is string => !!tag))).sort((a, b) => a.localeCompare(b, 'tr'))} onClose={() => setEditor(null)} onSave={saveItem} onSaveGroup={saveGroup} onDelete={editor.item ? async () => { if (await deleteItem(editor.item!)) setEditor(null); } : editor.group ? async () => { if (await deleteGroup(editor.group!)) setEditor(null); } : undefined} />}
   </div>;
+}
+
+function DurationCompletionModal({ item, onClose, onComplete }: { entry: AssignmentRow; item: ItemRow; onClose: () => void; onComplete: (minutes: number) => Promise<void> }) {
+  const [minutes, setMinutes] = useState(item.estimated_minutes?.toString() ?? '');
+  const [busy, setBusy] = useState(false);
+  async function submit(event: FormEvent) { event.preventDefault(); if (Number(minutes) <= 0) return; setBusy(true); await onComplete(Number(minutes)); setBusy(false); }
+  return <div className={styles.overlay} onMouseDown={onClose}><form className={`${styles.metricDialog} ${styles.durationDialog}`} onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}><div className={styles.dialogTop}><span>Aktivite tamamlandı</span><button type="button" onClick={onClose}>×</button></div><h2>{item.name}</h2><p>Bu aktivite ne kadar sürdü?</p><label>Süre<div><input type="number" min="1" step="5" required value={minutes} onChange={(event) => setMinutes(event.target.value)} autoFocus /><span>dakika</span></div></label><button className={styles.primary} disabled={busy || Number(minutes) <= 0}>{busy ? 'Kaydediliyor…' : 'Tamamla'}</button></form></div>;
 }
 
 function TimeSlotManager({ slots, onClose, onSave, onDelete }: {

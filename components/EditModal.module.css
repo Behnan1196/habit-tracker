@@ -169,6 +169,7 @@
   cursor: pointer;
   box-sizing: border-box;
 }
+.unitInput { position: relative; }.unitInput input { padding-right: 42px; }.unitInput span { position: absolute; top: 50%; right: 12px; transform: translateY(-50%); color: var(--muted); font-size: .72rem; }
 
 .colorGrid {
   display: flex;

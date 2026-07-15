@@ -7,9 +7,10 @@ import { AppMenu } from './app-menu';
 import styles from './planner-shell.module.css';
 
 type GroupRow = { id: string; parent_id: string | null; name: string };
-type ItemRow = { id: string; name: string; group_id: string | null; metric_unit: string | null; metric_period: 'daily' | 'weekly' | 'monthly'; color: string | null };
+type ItemRow = { id: string; name: string; group_id: string | null; kind: 'daily' | 'persistent' | 'metric'; metric_unit: string | null; metric_period: 'daily' | 'weekly' | 'monthly' | null; activity_tag: string | null; estimated_minutes: number | null; color: string | null };
 type MetricEntry = { id: string; item_id: string; entry_date: string; value: number };
-type Range = 30 | 90 | 365;
+type CompletedAssignment = { id: string; item_id: string; plan_date: string; actual_duration_minutes: number | null };
+type Range = 7 | 30 | 90 | 365;
 
 function isoDate(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -24,23 +25,27 @@ function Analytics({ user }: { user: User }) {
   const [items, setItems] = useState<ItemRow[]>([]);
   const [groups, setGroups] = useState<GroupRow[]>([]);
   const [entries, setEntries] = useState<MetricEntry[]>([]);
+  const [completed, setCompleted] = useState<CompletedAssignment[]>([]);
   const [range, setRange] = useState<Range>(90);
 
   useEffect(() => {
     const since = new Date(); since.setDate(since.getDate() - 364);
     void Promise.all([
-      supabase.from('m_items').select('id,name,group_id,metric_unit,metric_period,color').eq('kind', 'metric').eq('is_active', true).order('position'),
+      supabase.from('m_items').select('id,name,group_id,kind,metric_unit,metric_period,activity_tag,estimated_minutes,color').eq('is_active', true).order('position'),
       supabase.from('m_groups').select('id,parent_id,name').order('position'),
       supabase.from('m_metric_entries').select('id,item_id,entry_date,value').gte('entry_date', isoDate(since)).order('entry_date'),
-    ]).then(([itemResult, groupResult, entryResult]) => {
+      supabase.from('m_daily_assignments').select('id,item_id,plan_date,actual_duration_minutes').eq('status', 'done').gte('plan_date', isoDate(since)).order('plan_date'),
+    ]).then(([itemResult, groupResult, entryResult, completedResult]) => {
       setItems((itemResult.data ?? []) as ItemRow[]);
       setGroups((groupResult.data ?? []) as GroupRow[]);
       setEntries((entryResult.data ?? []) as MetricEntry[]);
+      setCompleted((completedResult.data ?? []) as CompletedAssignment[]);
     });
   }, [supabase]);
 
   const since = new Date(); since.setDate(since.getDate() - range + 1);
   const visibleEntries = entries.filter((entry) => entry.entry_date >= isoDate(since));
+  const metricItems = items.filter((item) => item.kind === 'metric');
   const metricsRoot = groups.find((group) => group.name.trim().toLocaleLowerCase('tr-TR') === 'metrics');
 
   function categoryFor(item: ItemRow) {
@@ -56,11 +61,21 @@ function Analytics({ user }: { user: User }) {
     return group.parent_id === metricsRoot.id ? group.name : 'Diğer metrikler';
   }
 
-  const categories = Array.from(new Set(items.map(categoryFor))).map((name) => ({ name, items: items.filter((item) => categoryFor(item) === name) }));
+  const categories = Array.from(new Set(metricItems.map(categoryFor))).map((name) => ({ name, items: metricItems.filter((item) => categoryFor(item) === name) }));
+  const activityRows = completed.filter((entry) => entry.plan_date >= isoDate(since)).map((entry) => ({ entry, item: items.find((item) => item.id === entry.item_id) })).filter((row) => row.item?.kind === 'daily' && row.item.activity_tag && (row.entry.actual_duration_minutes || row.item.estimated_minutes));
+  const activityStats = Array.from(new Set(activityRows.map((row) => row.item!.activity_tag!))).map((tag) => ({ tag, minutes: activityRows.filter((row) => row.item!.activity_tag === tag).reduce((sum, row) => sum + (row.entry.actual_duration_minutes ?? row.item!.estimated_minutes ?? 0), 0) })).sort((a, b) => b.minutes - a.minutes);
 
-  return <main className={styles.main}><header className={styles.header}><div><p>Ölç, gözlemle, karşılaştır</p><h1>Analitik.</h1></div><div className={styles.headerActions}><div className={styles.rangeSwitch}><button className={range === 30 ? styles.activeRange : ''} onClick={() => setRange(30)}>30 gün</button><button className={range === 90 ? styles.activeRange : ''} onClick={() => setRange(90)}>3 ay</button><button className={range === 365 ? styles.activeRange : ''} onClick={() => setRange(365)}>1 yıl</button></div><AppMenu user={user} active="analytics" /></div></header>
-    <div className={styles.metricCategories}>{categories.map((category) => <section className={styles.metricCategory} key={category.name}><div className={styles.metricCategoryTitle}><span>{category.items.length} metrik</span><h2>{category.name}</h2></div><div className={styles.metricTrendGrid}>{category.items.map((item) => <MetricTrend key={item.id} item={item} entries={visibleEntries.filter((entry) => entry.item_id === item.id)} range={range} since={since} />)}</div></section>)}{items.length === 0 && <div className={styles.empty}>Henüz grafik oluşturacak bir metrik bulunmuyor.</div>}</div>
+  return <main className={styles.main}><header className={styles.header}><div><p>Ölç, gözlemle, karşılaştır</p><h1>Analitik.</h1></div><div className={styles.headerActions}><div className={styles.rangeSwitch}><button className={range === 7 ? styles.activeRange : ''} onClick={() => setRange(7)}>7 gün</button><button className={range === 30 ? styles.activeRange : ''} onClick={() => setRange(30)}>30 gün</button><button className={range === 90 ? styles.activeRange : ''} onClick={() => setRange(90)}>3 ay</button><button className={range === 365 ? styles.activeRange : ''} onClick={() => setRange(365)}>1 yıl</button></div><AppMenu user={user} active="analytics" /></div></header>
+    <ActivityDuration stats={activityStats} />
+    <div className={styles.metricCategories}>{categories.map((category) => <section className={styles.metricCategory} key={category.name}><div className={styles.metricCategoryTitle}><span>{category.items.length} metrik</span><h2>{category.name}</h2></div><div className={styles.metricTrendGrid}>{category.items.map((item) => <MetricTrend key={item.id} item={item} entries={visibleEntries.filter((entry) => entry.item_id === item.id)} range={range} since={since} />)}</div></section>)}{metricItems.length === 0 && <div className={styles.empty}>Henüz grafik oluşturacak bir metrik bulunmuyor.</div>}</div>
   </main>;
+}
+
+function ActivityDuration({ stats }: { stats: { tag: string; minutes: number }[] }) {
+  const total = stats.reduce((sum, row) => sum + row.minutes, 0);
+  const maximum = Math.max(...stats.map((row) => row.minutes), 1);
+  function duration(minutes: number) { const hours = Math.floor(minutes / 60); const rest = minutes % 60; return hours ? `${hours} sa${rest ? ` ${rest} dk` : ''}` : `${rest} dk`; }
+  return <section className={styles.activityAnalytics}><div className={styles.metricCategoryTitle}><span>Tamamlanan aktiviteler</span><h2>Zaman dağılımı</h2></div><div className={styles.activityTotal}><strong>{duration(total)}</strong><small>toplam gerçekleşen süre</small></div><div className={styles.activityBars}>{stats.map((row) => <div key={row.tag}><header><strong>{row.tag}</strong><span>{duration(row.minutes)}</span></header><i><b style={{ width: `${row.minutes / maximum * 100}%` }} /></i></div>)}{stats.length === 0 && <div className={styles.metricEmpty}>Bu dönemde süre bilgisi olan tamamlanmış aktivite yok.</div>}</div></section>;
 }
 
 function MetricTrend({ item, entries, range, since }: { item: ItemRow; entries: MetricEntry[]; range: Range; since: Date }) {

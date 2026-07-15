@@ -13,6 +13,8 @@ export type EditableItem = {
   color: string | null;
   metric_unit: string | null;
   metric_period: 'daily' | 'weekly' | 'monthly' | null;
+  activity_tag: string | null;
+  estimated_minutes: number | null;
 };
 
 type GroupOption = { id: string; parent_id: string | null; name: string };
@@ -30,12 +32,13 @@ function readableText(background: string) {
   return (red * 299 + green * 587 + blue * 114) / 1000 > 150 ? '#18201a' : '#ffffff';
 }
 
-export function ItemEditorModal({ item, group, initialGroupId, initialKind, groups, onClose, onSave, onSaveGroup, onDelete }: {
+export function ItemEditorModal({ item, group, initialGroupId, initialKind, groups, activityTags, onClose, onSave, onSaveGroup, onDelete }: {
   item?: EditableItem;
   group?: EditableGroup;
   initialGroupId: string | null;
   initialKind?: EditorKind;
   groups: GroupOption[];
+  activityTags: string[];
   onClose: () => void;
   onSave: (draft: ItemDraft) => Promise<void>;
   onSaveGroup: (draft: GroupDraft) => Promise<void>;
@@ -49,6 +52,8 @@ export function ItemEditorModal({ item, group, initialGroupId, initialKind, grou
   const [backgroundColor, setBackgroundColor] = useState(group?.background_color ?? '#f4f5f1');
   const [metricUnit, setMetricUnit] = useState(item?.metric_unit ?? '');
   const [metricPeriod, setMetricPeriod] = useState<'daily' | 'weekly' | 'monthly'>(item?.metric_period ?? 'daily');
+  const [activityTag, setActivityTag] = useState(item?.activity_tag ?? '');
+  const [estimatedMinutes, setEstimatedMinutes] = useState(item?.estimated_minutes?.toString() ?? '');
   const [busy, setBusy] = useState(false);
 
   const groupOptions = useMemo(() => {
@@ -70,7 +75,7 @@ export function ItemEditorModal({ item, group, initialGroupId, initialKind, grou
     if (!name.trim()) return;
     setBusy(true);
     if (kind === 'group') await onSaveGroup({ name: name.trim(), parent_id: groupId, color, background_color: backgroundColor });
-    else await onSave({ name: name.trim(), kind, description: description.trim() || null, group_id: groupId, color, metric_unit: kind === 'metric' ? metricUnit.trim() || null : null, metric_period: kind === 'metric' ? metricPeriod : null });
+    else await onSave({ name: name.trim(), kind, description: description.trim() || null, group_id: groupId, color, metric_unit: kind === 'metric' ? metricUnit.trim() || null : null, metric_period: kind === 'metric' ? metricPeriod : null, activity_tag: kind === 'daily' ? activityTag.trim() || null : null, estimated_minutes: kind === 'daily' && Number(estimatedMinutes) > 0 ? Number(estimatedMinutes) : null });
     setBusy(false);
   }
 
@@ -97,12 +102,14 @@ export function ItemEditorModal({ item, group, initialGroupId, initialKind, grou
           <div><label className={styles.label} htmlFor="item-group">{kind === 'group' ? 'Üst grup' : 'Grup'}</label><select id="item-group" className={styles.select} value={groupId ?? ''} onChange={(event) => setGroupId(event.target.value || null)}><option value="">{kind === 'group' ? 'Ana seviye' : 'Grupsuz'}</option>{groupOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></div>
           {kind === 'metric' && <div><label className={styles.label} htmlFor="metric-unit">Birim</label><input id="metric-unit" className={styles.input} value={metricUnit} onChange={(event) => setMetricUnit(event.target.value)} placeholder="kg, cm, saat…" /></div>}
           {kind === 'metric' && <div><label className={styles.label} htmlFor="metric-period">Ölçüm periyodu</label><select id="metric-period" className={styles.select} value={metricPeriod} onChange={(event) => setMetricPeriod(event.target.value as 'daily' | 'weekly' | 'monthly')}><option value="daily">Günlük</option><option value="weekly">Haftalık</option><option value="monthly">Aylık</option></select></div>}
+          {kind === 'daily' && <div><label className={styles.label} htmlFor="activity-tag">Aktivite etiketi</label><input id="activity-tag" className={styles.input} list="activity-tags" value={activityTag} onChange={(event) => setActivityTag(event.target.value)} placeholder="Örn. Egzersiz" /><datalist id="activity-tags">{activityTags.map((tag) => <option key={tag} value={tag} />)}</datalist></div>}
+          {kind === 'daily' && <div><label className={styles.label} htmlFor="estimated-minutes">Tahmini süre</label><div className={styles.unitInput}><input id="estimated-minutes" className={styles.input} type="number" min="1" step="5" value={estimatedMinutes} onChange={(event) => setEstimatedMinutes(event.target.value)} placeholder="45" /><span>dk</span></div></div>}
         </div>
 
         <label className={styles.label}>Renk</label>
         <div className={styles.colorGrid}>{colors.map((option) => <button key={option} type="button" aria-label={`Renk ${option}`} className={`${styles.colorDot} ${color === option ? styles.selectedColor : ''}`} style={{ background: option }} onClick={() => setColor(option)} />)}</div>
         {kind === 'group' && <><label className={styles.label}>Arka plan</label><div className={styles.colorGrid}>{backgroundColors.map((option) => <button key={option} type="button" aria-label={`Arka plan ${option}`} className={`${styles.colorDot} ${backgroundColor === option ? styles.selectedColor : ''}`} style={{ background: option }} onClick={() => setBackgroundColor(option)} />)}</div></>}
-        <div className={styles.preview} style={kind === 'group' ? { background: backgroundColor, color: readableText(backgroundColor) } : undefined}><i style={{ background: color }} /><div><strong>{name.trim() || 'Önizleme'}</strong><small>{kind === 'group' ? 'Grup başlığı' : kind === 'daily' ? 'Günlük item' : kind === 'persistent' ? 'Sabit item' : `${metricPeriod === 'daily' ? 'Günlük' : metricPeriod === 'weekly' ? 'Haftalık' : 'Aylık'} metrik${metricUnit ? ` · ${metricUnit}` : ''}`}</small></div></div>
+        <div className={styles.preview} style={kind === 'group' ? { background: backgroundColor, color: readableText(backgroundColor) } : undefined}><i style={{ background: color }} /><div><strong>{name.trim() || 'Önizleme'}</strong><small>{kind === 'group' ? 'Grup başlığı' : kind === 'daily' ? `Günlük${activityTag ? ` · ${activityTag}` : ''}${estimatedMinutes ? ` · ${estimatedMinutes} dk` : ''}` : kind === 'persistent' ? 'Sabit item' : `${metricPeriod === 'daily' ? 'Günlük' : metricPeriod === 'weekly' ? 'Haftalık' : 'Aylık'} metrik${metricUnit ? ` · ${metricUnit}` : ''}`}</small></div></div>
       </div>
       <div className={styles.modalFooter}><div className={styles.actions}>{(item || group) && onDelete && <button className={styles.deleteBtn} type="button" disabled={busy} onClick={() => void onDelete()}>Sil</button>}<span /><button className={styles.cancelBtn} type="button" onClick={onClose}>Vazgeç</button><button className={styles.saveBtn} disabled={busy || !name.trim()}>{busy ? 'Kaydediliyor…' : 'Kaydet'}</button></div></div>
     </form>
