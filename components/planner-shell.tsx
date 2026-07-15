@@ -71,7 +71,7 @@ export function PlannerShell({ user }: { user: User }) {
   const loadData = useCallback(async () => {
     const [groupResult, itemResult, slotResult, assignmentResult, persistentResult, metricResult] = await Promise.all([
       supabase.from('m_groups').select('id,parent_id,name,color,background_color,position').order('position'),
-      supabase.from('m_items').select('id,group_id,kind,name,description,color,metric_unit,position').eq('is_active', true).order('position'),
+      supabase.from('m_items').select('id,group_id,kind,name,description,color,metric_unit,metric_period,position').eq('is_active', true).order('position'),
       supabase.from('m_time_slots').select('id,name,start_time,end_time,color,position,is_active').order('position'),
       supabase.from('m_daily_assignments').select('id,item_id,time_slot_id,plan_date,status').gte('plan_date', weekStartKey).lte('plan_date', weekEnd).neq('status', 'cancelled'),
       supabase.from('m_persistent_states').select('item_id,status,time_slot_id').neq('status', 'cancelled'),
