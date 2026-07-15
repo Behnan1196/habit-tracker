@@ -78,7 +78,7 @@ export function ItemEditorModal({ item, group, initialGroupId, initialKind, grou
       <div className={styles.modalBody}>
         <div className={styles.typeToggle}>
           <button className={`${styles.typeBtn} ${kind === 'daily' ? styles.active : ''}`} type="button" onClick={() => setKind('daily')}><strong>Günlük</strong><small>Gün ve saate planlanır</small></button>
-          <button className={`${styles.typeBtn} ${kind === 'persistent' ? styles.active : ''}`} type="button" onClick={() => setKind('persistent')}><strong>Sürekli</strong><small>Bir güne bağlı değildir</small></button>
+          <button className={`${styles.typeBtn} ${kind === 'persistent' ? styles.active : ''}`} type="button" onClick={() => setKind('persistent')}><strong>Sabit</strong><small>Bir güne bağlı değildir</small></button>
           <button className={`${styles.typeBtn} ${kind === 'metric' ? styles.active : ''}`} type="button" onClick={() => setKind('metric')}><strong>Metrik</strong><small>Sayısal değer tutulur</small></button>
           <button className={`${styles.typeBtn} ${kind === 'group' ? styles.active : ''}`} type="button" onClick={() => setKind('group')}><strong>Grup</strong><small>Alt kayıtları toplar</small></button>
         </div>
@@ -99,7 +99,7 @@ export function ItemEditorModal({ item, group, initialGroupId, initialKind, grou
         <label className={styles.label}>Renk</label>
         <div className={styles.colorGrid}>{colors.map((option) => <button key={option} type="button" aria-label={`Renk ${option}`} className={`${styles.colorDot} ${color === option ? styles.selectedColor : ''}`} style={{ background: option }} onClick={() => setColor(option)} />)}</div>
         {kind === 'group' && <><label className={styles.label}>Arka plan</label><div className={styles.colorGrid}>{backgroundColors.map((option) => <button key={option} type="button" aria-label={`Arka plan ${option}`} className={`${styles.colorDot} ${backgroundColor === option ? styles.selectedColor : ''}`} style={{ background: option }} onClick={() => setBackgroundColor(option)} />)}</div></>}
-        <div className={styles.preview} style={kind === 'group' ? { background: backgroundColor, color: readableText(backgroundColor) } : undefined}><i style={{ background: color }} /><div><strong>{name.trim() || 'Önizleme'}</strong><small>{kind === 'group' ? 'Grup başlığı' : kind === 'daily' ? 'Günlük item' : kind === 'persistent' ? 'Sürekli item' : `Metrik${metricUnit ? ` · ${metricUnit}` : ''}`}</small></div></div>
+        <div className={styles.preview} style={kind === 'group' ? { background: backgroundColor, color: readableText(backgroundColor) } : undefined}><i style={{ background: color }} /><div><strong>{name.trim() || 'Önizleme'}</strong><small>{kind === 'group' ? 'Grup başlığı' : kind === 'daily' ? 'Günlük item' : kind === 'persistent' ? 'Sabit item' : `Metrik${metricUnit ? ` · ${metricUnit}` : ''}`}</small></div></div>
       </div>
       <div className={styles.modalFooter}><div className={styles.actions}>{(item || group) && onDelete && <button className={styles.deleteBtn} type="button" disabled={busy} onClick={() => void onDelete()}>Sil</button>}<span /><button className={styles.cancelBtn} type="button" onClick={onClose}>Vazgeç</button><button className={styles.saveBtn} disabled={busy || !name.trim()}>{busy ? 'Kaydediliyor…' : 'Kaydet'}</button></div></div>
     </form>
