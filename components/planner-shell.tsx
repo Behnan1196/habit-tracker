@@ -3,12 +3,12 @@
 import type { User } from '@supabase/supabase-js';
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import type { PlanStatus } from '@/types/domain';
+import type { ItemKind, PlanStatus } from '@/types/domain';
 import { ItemEditorModal, type EditableGroup, type EditableItem } from './item-editor-modal';
 import { AppMenu, type CalendarView } from './app-menu';
 import styles from './planner-shell.module.css';
 
-type GroupRow = { id: string; parent_id: string | null; name: string; color: string | null; background_color: string | null; position: number };
+type GroupRow = { id: string; parent_id: string | null; name: string; color: string | null; background_color: string | null; position: number; content_type: 'standard' | 'module'; default_item_kind: ItemKind | null; module_key: string | null; module_settings: Record<string, unknown> };
 type ItemRow = EditableItem & { position: number };
 type SlotRow = { id: string; name: string; start_time: string | null; end_time: string | null; color: string | null; position: number; is_active: boolean };
 type AssignmentRow = { id: string; item_id: string; time_slot_id: string; plan_date: string; status: PlanStatus; actual_duration_minutes: number | null; source?: 'daily' | 'persistent' };
@@ -58,7 +58,7 @@ export function PlannerShell({ user }: { user: User }) {
   const [planTarget, setPlanTarget] = useState<{ item: ItemRow; date: string } | null>(null);
   const [persistentTarget, setPersistentTarget] = useState<ItemRow | null>(null);
   const [metricTarget, setMetricTarget] = useState<{ item: ItemRow; date: string; entry?: MetricRow } | null>(null);
-  const [editor, setEditor] = useState<{ item?: ItemRow; group?: GroupRow; groupId: string | null; initialKind?: 'group' } | null>(null);
+  const [editor, setEditor] = useState<{ item?: ItemRow; group?: GroupRow; groupId: string | null; initialKind?: ItemKind | 'group' } | null>(null);
   const [focusSnapshot, setFocusSnapshot] = useState<AssignmentRow[] | null>(null);
   const [durationTarget, setDurationTarget] = useState<AssignmentRow | null>(null);
   const [slotManagerOpen, setSlotManagerOpen] = useState(false);
@@ -71,7 +71,7 @@ export function PlannerShell({ user }: { user: User }) {
 
   const loadData = useCallback(async () => {
     const [groupResult, itemResult, slotResult, assignmentResult, persistentResult, metricResult] = await Promise.all([
-      supabase.from('m_groups').select('id,parent_id,name,color,background_color,position').order('position'),
+      supabase.from('m_groups').select('id,parent_id,name,color,background_color,position,content_type,default_item_kind,module_key,module_settings').order('position'),
       supabase.from('m_items').select('id,group_id,kind,name,description,color,metric_unit,metric_period,activity_tag,estimated_minutes,position').eq('is_active', true).order('position'),
       supabase.from('m_time_slots').select('id,name,start_time,end_time,color,position,is_active').order('position'),
       supabase.from('m_daily_assignments').select('id,item_id,time_slot_id,plan_date,status,actual_duration_minutes').gte('plan_date', weekStartKey).lte('plan_date', weekEnd).neq('status', 'cancelled'),
@@ -120,6 +120,15 @@ export function PlannerShell({ user }: { user: User }) {
   const fixedPlanned = persistent.filter((entry) => entry.status === 'planned' && entry.time_slot_id);
   const focusPlannedCount = selectedPlanned.length + fixedPlanned.length;
   const activeSlots = slots.filter((slot) => slot.is_active);
+
+  function defaultKindForGroup(groupId: string | null): ItemKind {
+    let current = groupId ? groups.find((group) => group.id === groupId) : undefined;
+    while (current) {
+      if (current.content_type === 'standard' && current.default_item_kind) return current.default_item_kind;
+      current = current.parent_id ? groups.find((group) => group.id === current!.parent_id) : undefined;
+    }
+    return 'daily';
+  }
 
   async function editGroup(group: GroupRow) {
     setEditor({ group, groupId: group.parent_id, initialKind: 'group' });
@@ -267,7 +276,7 @@ export function PlannerShell({ user }: { user: User }) {
   function renderGroup(group: GroupRow, depth = 0): React.ReactNode {
     const groupItems = items.filter((item) => item.group_id === group.id); const children = groups.filter((candidate) => candidate.parent_id === group.id);
     return <section className={styles.calendarGroup} key={group.id} onDragOver={(event) => event.preventDefault()} onDrop={(event) => void moveItem(event.dataTransfer.getData('text/item-id'), group.id)}>
-      <header style={{ paddingLeft: 10 + Math.min(depth * 12, 36), background: group.background_color ?? '#f4f5f1', color: readableText(group.background_color ?? '#f4f5f1') }}><i style={{ background: group.color ?? palette[0] }} /><button className={styles.groupTitle} onClick={() => void editGroup(group)}>{group.name}</button><small>{groupItems.length}</small><div><button aria-label={`${group.name} grubuna ekle`} title="Gruba ekle" onClick={() => setEditor({ groupId: group.id })}>＋</button></div></header>
+      <header style={{ paddingLeft: 10 + Math.min(depth * 12, 36), background: group.background_color ?? '#f4f5f1', color: readableText(group.background_color ?? '#f4f5f1') }}><i style={{ background: group.color ?? palette[0] }} /><button className={styles.groupTitle} onClick={() => void editGroup(group)}>{group.name}</button><small>{groupItems.length}</small><div>{group.content_type === 'standard' && <button aria-label={`${group.name} grubuna ekle`} title="Gruba ekle" onClick={() => setEditor({ groupId: group.id, initialKind: defaultKindForGroup(group.id) })}>＋</button>}</div></header>
       {groupItems.map((item) => renderItem(item, depth + 1))}{children.map((child) => renderGroup(child, depth + 1))}
     </section>;
   }
@@ -276,7 +285,7 @@ export function PlannerShell({ user }: { user: User }) {
     const fixedEntries: AssignmentRow[] = fixedPlanned.map((entry) => ({ id: `persistent-${entry.item_id}`, item_id: entry.item_id, time_slot_id: entry.time_slot_id!, plan_date: selectedDate, status: entry.status, actual_duration_minutes: null, source: 'persistent' }));
     setFocusSnapshot([...selectedPlanned.map((entry) => ({ ...entry, source: 'daily' as const })), ...fixedEntries]);
   }
-  const focusTitle = selectedDate === isoDate(new Date()) ? 'Bugünün Planı' : `${new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'long' }).format(parseDate(selectedDate))} Planı`;
+  const agendaTitle = selectedDate === isoDate(new Date()) ? 'Bugünün Ajandası' : `${new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'long' }).format(parseDate(selectedDate))} Ajandası`;
   const focusSlots = slots.map((slot) => ({ ...slot, entries: (focusSnapshot ?? []).filter((entry) => entry.time_slot_id === slot.id) })).filter((slot) => slot.entries.length);
 
   if (loading) return <div className={styles.loading}>Planın yükleniyor…</div>;
@@ -284,7 +293,7 @@ export function PlannerShell({ user }: { user: User }) {
   return <div className={styles.app}>
     <main className={styles.mainWide}>
       {error && <button className={styles.errorBanner} onClick={() => setError('')}>{error} ×</button>}
-      <div className={styles.stickyTop}><header className={styles.header}><div className={styles.compactBrand}><span>M</span><strong>Momentum</strong></div><div className={styles.headerActions}><button className={styles.focusButton} onClick={openFocus}><span className={styles.focusDot} /> {focusTitle} <b>{focusPlannedCount}</b></button><AppMenu user={user} active="calendar" view={view} onViewChange={changeView} onManageSlots={() => setSlotManagerOpen(true)} /></div></header></div>
+      <div className={styles.stickyTop}><header className={styles.header}><div className={styles.compactBrand}><span>M</span><strong>Momentum</strong></div><div className={styles.headerActions}><button className={styles.focusButton} onClick={openFocus}><span className={styles.focusDot}>▤</span> {agendaTitle} <b>{focusPlannedCount}</b></button><AppMenu user={user} active="calendar" view={view} onViewChange={changeView} onManageSlots={() => setSlotManagerOpen(true)} /></div></header></div>
       <section className={`${styles.calendarBoard} ${view === 'daily' ? styles.dailyView : ''}`}>
         <div className={styles.calendarScroller}>
           <div className={styles.calendarToolbar}><button aria-label={view === 'daily' ? 'Önceki gün' : 'Önceki hafta'} onClick={() => movePeriod(-1)}>‹</button><button className={styles.toolbarDate} onClick={() => { const today = new Date(); setWeekStart(mondayOf(today)); setSelectedDate(isoDate(today)); }}><strong>{view === 'daily' ? new Intl.DateTimeFormat('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' }).format(parseDate(selectedDate)) : <>{new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'short' }).format(weekStart)} – {new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'short' }).format(weekDates[6])}</>}</strong><small>Bugüne dön</small></button><button aria-label={view === 'daily' ? 'Sonraki gün' : 'Sonraki hafta'} onClick={() => movePeriod(1)}>›</button><button className={styles.headerAdd} aria-label="Grup veya item ekle" title="Grup veya item ekle" onClick={() => setEditor({ groupId: null })}>＋</button></div>
@@ -294,10 +303,10 @@ export function PlannerShell({ user }: { user: User }) {
       </section>
     </main>
     {planTarget && <div className={styles.overlay} onMouseDown={() => setPlanTarget(null)}><section className={styles.dialog} role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><div className={styles.dialogTop}><span>{new Intl.DateTimeFormat('tr-TR', { dateStyle: 'long' }).format(parseDate(planTarget.date))}</span><button onClick={() => setPlanTarget(null)}>×</button></div><h2>{planTarget.item.name}</h2><p>Bir veya birden fazla zaman dilimi seçebilirsin.</p><div className={styles.slotPicker}>{activeSlots.map((slot) => { const chosen = assignments.some((entry) => entry.item_id === planTarget.item.id && entry.time_slot_id === slot.id && entry.plan_date === planTarget.date && entry.status === 'planned'); return <button key={slot.id} className={chosen ? styles.chosen : ''} onClick={() => void toggleSlot(slot.id)}><i style={{ background: slot.color ?? palette[0] }} /><span><strong>{slot.name}</strong><small>{shortTime(slot.start_time)}–{shortTime(slot.end_time)}</small></span><b>{chosen ? '✓' : ''}</b></button>; })}</div><button className={styles.primary} onClick={() => setPlanTarget(null)}>Tamam</button></section></div>}
-    {persistentTarget && <div className={styles.overlay} onMouseDown={() => setPersistentTarget(null)}><section className={styles.dialog} role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><div className={styles.dialogTop}><span>Sabit item</span><button onClick={() => setPersistentTarget(null)}>×</button></div><h2>{persistentTarget.name}</h2><p>Focus’ta görüneceği zaman dilimini seç.</p><div className={styles.slotPicker}>{activeSlots.map((slot) => { const state = persistent.find((entry) => entry.item_id === persistentTarget.id); const chosen = state?.status === 'planned' && state.time_slot_id === slot.id; return <button key={slot.id} className={chosen ? styles.chosen : ''} onClick={() => void setPersistentSlot(slot.id)}><i style={{ background: slot.color ?? palette[0] }} /><span><strong>{slot.name}</strong><small>{shortTime(slot.start_time)}–{shortTime(slot.end_time)}</small></span><b>{chosen ? '✓' : ''}</b></button>; })}</div><button className={styles.primary} onClick={() => setPersistentTarget(null)}>Tamam</button></section></div>}
+    {persistentTarget && <div className={styles.overlay} onMouseDown={() => setPersistentTarget(null)}><section className={styles.dialog} role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><div className={styles.dialogTop}><span>Sabit item</span><button onClick={() => setPersistentTarget(null)}>×</button></div><h2>{persistentTarget.name}</h2><p>Ajanda’da görüneceği zaman dilimini seç.</p><div className={styles.slotPicker}>{activeSlots.map((slot) => { const state = persistent.find((entry) => entry.item_id === persistentTarget.id); const chosen = state?.status === 'planned' && state.time_slot_id === slot.id; return <button key={slot.id} className={chosen ? styles.chosen : ''} onClick={() => void setPersistentSlot(slot.id)}><i style={{ background: slot.color ?? palette[0] }} /><span><strong>{slot.name}</strong><small>{shortTime(slot.start_time)}–{shortTime(slot.end_time)}</small></span><b>{chosen ? '✓' : ''}</b></button>; })}</div><button className={styles.primary} onClick={() => setPersistentTarget(null)}>Tamam</button></section></div>}
     {slotManagerOpen && <TimeSlotManager slots={activeSlots} onClose={() => setSlotManagerOpen(false)} onSave={saveSlot} onDelete={archiveSlot} />}
     {metricTarget && <MetricEntryModal target={metricTarget} onClose={() => setMetricTarget(null)} onSave={saveMetric} />}
-    {focusSnapshot && <div className={styles.overlay} onMouseDown={() => setFocusSnapshot(null)}><section className={`${styles.dialog} ${styles.focusDialog}`} role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><div className={styles.dialogTop}><span>{new Intl.DateTimeFormat('tr-TR', { dateStyle: 'long' }).format(parseDate(selectedDate))}</span><button onClick={() => setFocusSnapshot(null)}>×</button></div><h2>{focusTitle}</h2><p>{focusSnapshot.filter((entry) => entry.status === 'planned').length} item seni bekliyor.</p>{focusSlots.map((slot) => <div className={styles.focusSlot} key={slot.id}><header><i style={{ background: slot.color ?? palette[0] }} /><strong>{slot.name}</strong><span>{shortTime(slot.start_time)}–{shortTime(slot.end_time)}</span></header>{slot.entries.map((entry) => { const item = items.find((candidate) => candidate.id === entry.item_id); return <button key={entry.id} className={entry.status === 'done' ? styles.focusDone : ''} onClick={() => { if (entry.status !== 'planned') return; if (entry.source === 'daily' && (item?.activity_tag || item?.estimated_minutes)) setDurationTarget(entry); else void completeAssignment(entry); }}><span className={styles.roundCheck}>{entry.status === 'done' ? '✓' : ''}</span><span><strong>{item?.name}</strong><small>{item?.activity_tag ? `${item.activity_tag}${item.estimated_minutes ? ` · ${item.estimated_minutes} dk` : ''}` : groups.find((group) => group.id === item?.group_id)?.name ?? 'Grupsuz'}</small></span><em>{entry.status === 'done' ? entry.actual_duration_minutes ? `${entry.actual_duration_minutes} dk` : 'Yapıldı' : 'Planlandı'}</em></button>; })}</div>)}{!focusSlots.length && <div className={styles.empty}>Bu gün için planlanmış item yok.</div>}</section></div>}
+    {focusSnapshot && <div className={styles.overlay} onMouseDown={() => setFocusSnapshot(null)}><section className={`${styles.dialog} ${styles.focusDialog}`} role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><div className={styles.dialogTop}><span>{new Intl.DateTimeFormat('tr-TR', { dateStyle: 'long' }).format(parseDate(selectedDate))}</span><button onClick={() => setFocusSnapshot(null)}>×</button></div><h2>{agendaTitle}</h2><p>{focusSnapshot.filter((entry) => entry.status === 'planned').length} item seni bekliyor.</p>{focusSlots.map((slot) => <div className={styles.focusSlot} key={slot.id}><header><i style={{ background: slot.color ?? palette[0] }} /><strong>{slot.name}</strong><span>{shortTime(slot.start_time)}–{shortTime(slot.end_time)}</span></header>{slot.entries.map((entry) => { const item = items.find((candidate) => candidate.id === entry.item_id); return <button key={entry.id} className={entry.status === 'done' ? styles.focusDone : ''} onClick={() => { if (entry.status !== 'planned') return; if (entry.source === 'daily' && (item?.activity_tag || item?.estimated_minutes)) setDurationTarget(entry); else void completeAssignment(entry); }}><span className={styles.roundCheck}>{entry.status === 'done' ? '✓' : ''}</span><span><strong>{item?.name}</strong><small>{item?.activity_tag ? `${item.activity_tag}${item.estimated_minutes ? ` · ${item.estimated_minutes} dk` : ''}` : groups.find((group) => group.id === item?.group_id)?.name ?? 'Grupsuz'}</small></span><em>{entry.status === 'done' ? entry.actual_duration_minutes ? `${entry.actual_duration_minutes} dk` : 'Yapıldı' : 'Planlandı'}</em></button>; })}</div>)}{!focusSlots.length && <div className={styles.empty}>Bu gün için planlanmış item yok.</div>}</section></div>}
     {durationTarget && <DurationCompletionModal entry={durationTarget} item={items.find((item) => item.id === durationTarget.item_id)!} onClose={() => setDurationTarget(null)} onComplete={async (minutes) => { await completeAssignment(durationTarget, minutes); setDurationTarget(null); }} />}
     {editor && <ItemEditorModal key={editor.item?.id ?? editor.group?.id ?? `new-${editor.initialKind ?? 'item'}-${editor.groupId ?? 'root'}`} item={editor.item} group={editor.group} initialKind={editor.initialKind} initialGroupId={editor.groupId} groups={groups} activityTags={Array.from(new Set(items.map((item) => item.activity_tag).filter((tag): tag is string => !!tag))).sort((a, b) => a.localeCompare(b, 'tr'))} onClose={() => setEditor(null)} onSave={saveItem} onSaveGroup={saveGroup} onDelete={editor.item ? async () => { if (await deleteItem(editor.item!)) setEditor(null); } : editor.group ? async () => { if (await deleteGroup(editor.group!)) setEditor(null); } : undefined} />}
   </div>;

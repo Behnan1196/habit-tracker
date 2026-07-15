@@ -91,3 +91,4 @@
   .overlay { padding: 12px; align-items: center; }
   .dialog, .metricDialog { max-height: calc(100dvh - 24px); }
 }
+.focusButton .focusDot { width: auto; height: auto; margin-right: 7px; display: inline; border-radius: 0; background: transparent; color: #dcebdd; font-size: 15px; }
