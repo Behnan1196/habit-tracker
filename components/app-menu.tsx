@@ -13,14 +13,12 @@ export function AppMenu({
   active,
   view,
   onViewChange,
-  onAddGroup,
   onManageSlots,
 }: {
   user: User;
   active: 'calendar' | 'analytics';
   view?: CalendarView;
   onViewChange?: (view: CalendarView) => void;
-  onAddGroup?: () => void;
   onManageSlots?: () => void;
 }) {
   const supabase = useMemo(() => createClient(), []);
@@ -43,9 +41,7 @@ export function AppMenu({
       </div>
       <div className={styles.menuSection}>
         <small>Momentum</small>
-        <Link className={active === 'calendar' ? styles.menuActive : ''} href="/" onClick={close}><span>◫</span> Takvim</Link>
         <Link className={active === 'analytics' ? styles.menuActive : ''} href="/analytics" onClick={close}><span>⌁</span> Analitik</Link>
-        {onAddGroup && <button onClick={() => { onAddGroup(); close(); }}><span>＋</span> Yeni grup</button>}
         {onManageSlots && <button onClick={() => { onManageSlots(); close(); }}><span>◷</span> Zaman dilimleri</button>}
       </div>
       <button className={styles.menuSignOut} onClick={() => void supabase.auth.signOut()}><span>↗</span> Çıkış yap</button>

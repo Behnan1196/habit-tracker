@@ -121,10 +121,6 @@ export function PlannerShell({ user }: { user: User }) {
   const focusPlannedCount = selectedPlanned.length + fixedPlanned.length;
   const activeSlots = slots.filter((slot) => slot.is_active);
 
-  async function addGroup(parentId: string | null = null) {
-    setEditor({ groupId: parentId, initialKind: 'group' });
-  }
-
   async function editGroup(group: GroupRow) {
     setEditor({ group, groupId: group.parent_id, initialKind: 'group' });
   }
@@ -288,7 +284,7 @@ export function PlannerShell({ user }: { user: User }) {
   return <div className={styles.app}>
     <main className={styles.mainWide}>
       {error && <button className={styles.errorBanner} onClick={() => setError('')}>{error} ×</button>}
-      <div className={styles.stickyTop}><header className={styles.header}><div className={styles.compactBrand}><span>M</span><strong>Momentum</strong></div><div className={styles.headerActions}><button className={styles.focusButton} onClick={openFocus}><span className={styles.focusDot} /> {focusTitle} <b>{focusPlannedCount}</b></button><AppMenu user={user} active="calendar" view={view} onViewChange={changeView} onAddGroup={() => void addGroup()} onManageSlots={() => setSlotManagerOpen(true)} /></div></header></div>
+      <div className={styles.stickyTop}><header className={styles.header}><div className={styles.compactBrand}><span>M</span><strong>Momentum</strong></div><div className={styles.headerActions}><button className={styles.focusButton} onClick={openFocus}><span className={styles.focusDot} /> {focusTitle} <b>{focusPlannedCount}</b></button><AppMenu user={user} active="calendar" view={view} onViewChange={changeView} onManageSlots={() => setSlotManagerOpen(true)} /></div></header></div>
       <section className={`${styles.calendarBoard} ${view === 'daily' ? styles.dailyView : ''}`}>
         <div className={styles.calendarScroller}>
           <div className={styles.calendarToolbar}><button aria-label={view === 'daily' ? 'Önceki gün' : 'Önceki hafta'} onClick={() => movePeriod(-1)}>‹</button><button className={styles.toolbarDate} onClick={() => { const today = new Date(); setWeekStart(mondayOf(today)); setSelectedDate(isoDate(today)); }}><strong>{view === 'daily' ? new Intl.DateTimeFormat('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' }).format(parseDate(selectedDate)) : <>{new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'short' }).format(weekStart)} – {new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'short' }).format(weekDates[6])}</>}</strong><small>Bugüne dön</small></button><button aria-label={view === 'daily' ? 'Sonraki gün' : 'Sonraki hafta'} onClick={() => movePeriod(1)}>›</button><button className={styles.headerAdd} aria-label="Grup veya item ekle" title="Grup veya item ekle" onClick={() => setEditor({ groupId: null })}>＋</button></div>
