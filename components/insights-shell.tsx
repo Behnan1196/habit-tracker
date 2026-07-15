@@ -27,6 +27,7 @@ function Analytics({ user }: { user: User }) {
   const [entries, setEntries] = useState<MetricEntry[]>([]);
   const [completed, setCompleted] = useState<CompletedAssignment[]>([]);
   const [range, setRange] = useState<Range>(90);
+  const [activityRange, setActivityRange] = useState<1 | 7 | 30>(7);
 
   useEffect(() => {
     const since = new Date(); since.setDate(since.getDate() - 364);
@@ -62,20 +63,26 @@ function Analytics({ user }: { user: User }) {
   }
 
   const categories = Array.from(new Set(metricItems.map(categoryFor))).map((name) => ({ name, items: metricItems.filter((item) => categoryFor(item) === name) }));
-  const activityRows = completed.filter((entry) => entry.plan_date >= isoDate(since)).map((entry) => ({ entry, item: items.find((item) => item.id === entry.item_id) })).filter((row) => row.item?.kind === 'daily' && row.item.activity_tag && (row.entry.actual_duration_minutes || row.item.estimated_minutes));
+  const activitySince = new Date(); activitySince.setDate(activitySince.getDate() - activityRange + 1);
+  const activityRows = completed.filter((entry) => entry.plan_date >= isoDate(activitySince)).map((entry) => ({ entry, item: items.find((item) => item.id === entry.item_id) })).filter((row) => row.item?.kind === 'daily' && row.item.activity_tag && (row.entry.actual_duration_minutes || row.item.estimated_minutes));
   const activityStats = Array.from(new Set(activityRows.map((row) => row.item!.activity_tag!))).map((tag) => ({ tag, minutes: activityRows.filter((row) => row.item!.activity_tag === tag).reduce((sum, row) => sum + (row.entry.actual_duration_minutes ?? row.item!.estimated_minutes ?? 0), 0) })).sort((a, b) => b.minutes - a.minutes);
 
   return <main className={styles.main}><header className={styles.header}><div><p>Ölç, gözlemle, karşılaştır</p><h1>Analitik.</h1></div><div className={styles.headerActions}><div className={styles.rangeSwitch}><button className={range === 7 ? styles.activeRange : ''} onClick={() => setRange(7)}>7 gün</button><button className={range === 30 ? styles.activeRange : ''} onClick={() => setRange(30)}>30 gün</button><button className={range === 90 ? styles.activeRange : ''} onClick={() => setRange(90)}>3 ay</button><button className={range === 365 ? styles.activeRange : ''} onClick={() => setRange(365)}>1 yıl</button></div><AppMenu user={user} active="analytics" /></div></header>
-    <ActivityDuration stats={activityStats} />
+    <ActivityDuration stats={activityStats} range={activityRange} onRangeChange={setActivityRange} />
     <div className={styles.metricCategories}>{categories.map((category) => <section className={styles.metricCategory} key={category.name}><div className={styles.metricCategoryTitle}><span>{category.items.length} metrik</span><h2>{category.name}</h2></div><div className={styles.metricTrendGrid}>{category.items.map((item) => <MetricTrend key={item.id} item={item} entries={visibleEntries.filter((entry) => entry.item_id === item.id)} range={range} since={since} />)}</div></section>)}{metricItems.length === 0 && <div className={styles.empty}>Henüz grafik oluşturacak bir metrik bulunmuyor.</div>}</div>
   </main>;
 }
 
-function ActivityDuration({ stats }: { stats: { tag: string; minutes: number }[] }) {
+function ActivityDuration({ stats, range, onRangeChange }: { stats: { tag: string; minutes: number }[]; range: 1 | 7 | 30; onRangeChange: (range: 1 | 7 | 30) => void }) {
   const total = stats.reduce((sum, row) => sum + row.minutes, 0);
   const maximum = Math.max(...stats.map((row) => row.minutes), 1);
+  const colors = ['#395f47', '#c48255', '#667e99', '#8d76a4', '#b18a4f', '#4f9186', '#ad765e'];
+  const slices = stats.reduce<{ cursor: number; values: string[] }>((result, row, index) => {
+    const end = result.cursor + (total ? row.minutes / total * 100 : 0);
+    return { cursor: end, values: [...result.values, `${colors[index % colors.length]} ${result.cursor}% ${end}%`] };
+  }, { cursor: 0, values: [] }).values;
   function duration(minutes: number) { const hours = Math.floor(minutes / 60); const rest = minutes % 60; return hours ? `${hours} sa${rest ? ` ${rest} dk` : ''}` : `${rest} dk`; }
-  return <section className={styles.activityAnalytics}><div className={styles.metricCategoryTitle}><span>Tamamlanan aktiviteler</span><h2>Zaman dağılımı</h2></div><div className={styles.activityTotal}><strong>{duration(total)}</strong><small>toplam gerçekleşen süre</small></div><div className={styles.activityBars}>{stats.map((row) => <div key={row.tag}><header><strong>{row.tag}</strong><span>{duration(row.minutes)}</span></header><i><b style={{ width: `${row.minutes / maximum * 100}%` }} /></i></div>)}{stats.length === 0 && <div className={styles.metricEmpty}>Bu dönemde süre bilgisi olan tamamlanmış aktivite yok.</div>}</div></section>;
+  return <section className={styles.activityAnalytics}><div className={styles.activityHeading}><div className={styles.metricCategoryTitle}><span>Tamamlanan aktiviteler</span><h2>Zaman dağılımı</h2></div><div className={styles.activityRange}><button className={range === 1 ? styles.activeRange : ''} onClick={() => onRangeChange(1)}>Bugün</button><button className={range === 7 ? styles.activeRange : ''} onClick={() => onRangeChange(7)}>7 gün</button><button className={range === 30 ? styles.activeRange : ''} onClick={() => onRangeChange(30)}>30 gün</button></div></div>{stats.length ? <div className={styles.activityVisual}><div className={styles.activityPie} style={{ background: `conic-gradient(${slices.join(', ')})` }} role="img" aria-label="Aktivite süre dağılımı"><div><strong>{duration(total)}</strong><small>toplam</small></div></div><div className={styles.activityBars}>{stats.map((row, index) => <div key={row.tag}><header><strong><i style={{ background: colors[index % colors.length] }} />{row.tag}</strong><span>{duration(row.minutes)}</span></header><b><em style={{ width: `${row.minutes / maximum * 100}%`, background: colors[index % colors.length] }} /></b></div>)}</div></div> : <div className={styles.metricEmpty}>Bu dönemde süre bilgisi olan tamamlanmış aktivite yok.</div>}</section>;
 }
 
 function MetricTrend({ item, entries, range, since }: { item: ItemRow; entries: MetricEntry[]; range: Range; since: Date }) {
