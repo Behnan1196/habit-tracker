@@ -92,3 +92,20 @@
   .dialog, .metricDialog { max-height: calc(100dvh - 24px); }
 }
 .focusButton .focusDot { width: auto; height: auto; margin-right: 7px; display: inline; border-radius: 0; background: transparent; color: #dcebdd; font-size: 15px; }
+.notesModule { padding: 10px; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; border-bottom: 1px solid #eff0ec; background: #fbfcfa; }
+.notesModule > button { min-width: 0; min-height: 105px; padding: 13px; display: block; overflow: hidden; border: 1px solid var(--line); border-radius: 11px; background: white; text-align: left; cursor: pointer; box-shadow: 0 4px 15px #263c2c08; }
+.notesModule > button:hover { border-color: #9caf9e; }
+.notesModule header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.notesModule header strong { min-width: 0; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.notesModule header strong span { margin-right: 5px; color: var(--orange); font-size: 7px; }
+.notesModule header small { flex: 0 0 auto; color: var(--muted); font-size: 8px; }
+.notesModule p { margin: 10px 0 0; display: -webkit-box; overflow: hidden; color: var(--muted); font-size: 10px; line-height: 1.45; white-space: pre-wrap; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.notesEmpty { width: calc(100% - 20px); margin: 10px; padding: 22px; display: grid; place-items: center; gap: 3px; border: 1px dashed #b8c1b7; border-radius: 11px; color: var(--muted); background: #fbfcfa; cursor: pointer; }
+.notesEmpty span { color: var(--accent); font-size: 19px; }.notesEmpty strong { color: var(--ink); font-size: 11px; }.notesEmpty small { font-size: 9px; }
+.noteDialog textarea { width: 100%; box-sizing: border-box; }
+.metricDialog > .notePin { display: flex; grid-template-columns: none; flex-direction: row; align-items: center; gap: 8px; text-transform: none; letter-spacing: 0; cursor: pointer; }
+.metricDialog > .notePin input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+.noteActions { margin-top: 18px; display: flex; align-items: center; gap: 8px; }.noteActions > span { flex: 1; }.noteActions .primary { width: auto; min-width: 110px; margin: 0; }
+.noteDelete { padding: 10px 12px; border: 1px solid #edd0c7; border-radius: 9px; color: #9b4d3a; background: #fff5f1; cursor: pointer; }
+
+@media (max-width: 520px) { .notesModule { grid-template-columns: 1fr 1fr; gap: 6px; padding: 7px; }.notesModule > button { min-height: 92px; padding: 10px; } }

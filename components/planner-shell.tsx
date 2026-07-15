@@ -14,6 +14,7 @@ type SlotRow = { id: string; name: string; start_time: string | null; end_time: 
 type AssignmentRow = { id: string; item_id: string; time_slot_id: string; plan_date: string; status: PlanStatus; actual_duration_minutes: number | null; source?: 'daily' | 'persistent' };
 type PersistentRow = { item_id: string; status: PlanStatus; time_slot_id: string | null };
 type MetricRow = { id: string; item_id: string; entry_date: string; value: number; note: string | null };
+type NoteRow = { id: string; group_id: string; title: string; body: string; is_pinned: boolean; created_at: string; updated_at: string };
 
 const palette = ['#395f47', '#638169', '#667e99', '#8d76a4', '#ad765e', '#b18a4f'];
 
@@ -55,6 +56,7 @@ export function PlannerShell({ user }: { user: User }) {
   const [assignments, setAssignments] = useState<AssignmentRow[]>([]);
   const [persistent, setPersistent] = useState<PersistentRow[]>([]);
   const [metrics, setMetrics] = useState<MetricRow[]>([]);
+  const [notes, setNotes] = useState<NoteRow[]>([]);
   const [planTarget, setPlanTarget] = useState<{ item: ItemRow; date: string } | null>(null);
   const [persistentTarget, setPersistentTarget] = useState<ItemRow | null>(null);
   const [metricTarget, setMetricTarget] = useState<{ item: ItemRow; date: string; entry?: MetricRow } | null>(null);
@@ -62,6 +64,7 @@ export function PlannerShell({ user }: { user: User }) {
   const [focusSnapshot, setFocusSnapshot] = useState<AssignmentRow[] | null>(null);
   const [durationTarget, setDurationTarget] = useState<AssignmentRow | null>(null);
   const [slotManagerOpen, setSlotManagerOpen] = useState(false);
+  const [noteEditor, setNoteEditor] = useState<{ groupId: string; note?: NoteRow } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const weekDates = useMemo(() => Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)), [weekStart]);
@@ -70,21 +73,23 @@ export function PlannerShell({ user }: { user: User }) {
   const weekStartKey = isoDate(weekStart);
 
   const loadData = useCallback(async () => {
-    const [groupResult, itemResult, slotResult, assignmentResult, persistentResult, metricResult] = await Promise.all([
+    const [groupResult, itemResult, slotResult, assignmentResult, persistentResult, metricResult, noteResult] = await Promise.all([
       supabase.from('m_groups').select('id,parent_id,name,color,background_color,position,content_type,default_item_kind,module_key,module_settings').order('position'),
       supabase.from('m_items').select('id,group_id,kind,name,description,color,metric_unit,metric_period,activity_tag,estimated_minutes,position').eq('is_active', true).order('position'),
       supabase.from('m_time_slots').select('id,name,start_time,end_time,color,position,is_active').order('position'),
       supabase.from('m_daily_assignments').select('id,item_id,time_slot_id,plan_date,status,actual_duration_minutes').gte('plan_date', weekStartKey).lte('plan_date', weekEnd).neq('status', 'cancelled'),
       supabase.from('m_persistent_states').select('item_id,status,time_slot_id').neq('status', 'cancelled'),
       supabase.from('m_metric_entries').select('id,item_id,entry_date,value,note').gte('entry_date', weekStartKey).lte('entry_date', weekEnd),
+      supabase.from('m_notes').select('id,group_id,title,body,is_pinned,created_at,updated_at').order('is_pinned', { ascending: false }).order('updated_at', { ascending: false }),
     ]);
-    const results = [groupResult, itemResult, slotResult, assignmentResult, persistentResult, metricResult];
+    const results = [groupResult, itemResult, slotResult, assignmentResult, persistentResult, metricResult, noteResult];
     const firstError = results.find((result) => result.error)?.error;
     if (firstError) setError(firstError.message);
     else {
       setGroups((groupResult.data ?? []) as GroupRow[]); setItems((itemResult.data ?? []) as ItemRow[]);
       setSlots((slotResult.data ?? []) as SlotRow[]); setAssignments((assignmentResult.data ?? []) as AssignmentRow[]);
       setPersistent((persistentResult.data ?? []) as PersistentRow[]); setMetrics((metricResult.data ?? []) as MetricRow[]);
+      setNotes((noteResult.data ?? []) as NoteRow[]);
     }
     setLoading(false);
   }, [supabase, weekEnd, weekStartKey]);
@@ -174,6 +179,13 @@ export function PlannerShell({ user }: { user: User }) {
   }
 
   async function saveGroup(draft: Omit<EditableGroup, 'id'>) {
+    if (editor?.group && editor.group.content_type === 'standard' && draft.content_type === 'module') {
+      const hasContents = items.some((item) => item.group_id === editor.group!.id) || groups.some((group) => group.parent_id === editor.group!.id);
+      if (hasContents) { const message = 'Notlar modülüne dönüştürmek için grubun item ve alt gruplarını önce taşımalısın.'; window.alert(message); setError(message); return; }
+    }
+    if (editor?.group && editor.group.content_type === 'module' && draft.content_type === 'standard' && notes.some((note) => note.group_id === editor.group!.id)) {
+      const message = 'Standart gruba dönüştürmeden önce bu modüldeki notları silmelisin.'; window.alert(message); setError(message); return;
+    }
     if (editor?.item) {
       const oldItem = editor.item;
       const created = await supabase.from('m_groups').insert({ ...draft, user_id: user.id, position: groups.length }).select('id').single();
@@ -194,6 +206,23 @@ export function PlannerShell({ user }: { user: User }) {
     const { error: deleteError } = await supabase.from('m_items').delete().eq('id', item.id);
     if (deleteError) { setError(deleteError.message); return false; }
     await loadData(); return true;
+  }
+
+  async function saveNote(draft: { title: string; body: string; is_pinned: boolean }) {
+    if (!noteEditor) return false;
+    const values = { ...draft, group_id: noteEditor.groupId };
+    const result = noteEditor.note
+      ? await supabase.from('m_notes').update(values).eq('id', noteEditor.note.id)
+      : await supabase.from('m_notes').insert({ ...values, user_id: user.id });
+    if (result.error) { setError(result.error.message); return false; }
+    setNoteEditor(null); await loadData(); return true;
+  }
+
+  async function deleteNote(note: NoteRow) {
+    if (!window.confirm(`“${note.title}” notu silinsin mi?`)) return false;
+    const result = await supabase.from('m_notes').delete().eq('id', note.id);
+    if (result.error) { setError(result.error.message); return false; }
+    setNoteEditor(null); await loadData(); return true;
   }
 
   async function saveSlot(draft: { id?: string; name: string; start_time: string | null; end_time: string | null; color: string }) {
@@ -275,9 +304,10 @@ export function PlannerShell({ user }: { user: User }) {
 
   function renderGroup(group: GroupRow, depth = 0): React.ReactNode {
     const groupItems = items.filter((item) => item.group_id === group.id); const children = groups.filter((candidate) => candidate.parent_id === group.id);
+    const moduleNotes = notes.filter((note) => note.group_id === group.id);
     return <section className={styles.calendarGroup} key={group.id} onDragOver={(event) => event.preventDefault()} onDrop={(event) => void moveItem(event.dataTransfer.getData('text/item-id'), group.id)}>
-      <header style={{ paddingLeft: 10 + Math.min(depth * 12, 36), background: group.background_color ?? '#f4f5f1', color: readableText(group.background_color ?? '#f4f5f1') }}><i style={{ background: group.color ?? palette[0] }} /><button className={styles.groupTitle} onClick={() => void editGroup(group)}>{group.name}</button><small>{groupItems.length}</small><div>{group.content_type === 'standard' && <button aria-label={`${group.name} grubuna ekle`} title="Gruba ekle" onClick={() => setEditor({ groupId: group.id, initialKind: defaultKindForGroup(group.id) })}>＋</button>}</div></header>
-      {groupItems.map((item) => renderItem(item, depth + 1))}{children.map((child) => renderGroup(child, depth + 1))}
+      <header style={{ paddingLeft: 10 + Math.min(depth * 12, 36), background: group.background_color ?? '#f4f5f1', color: readableText(group.background_color ?? '#f4f5f1') }}><i style={{ background: group.color ?? palette[0] }} /><button className={styles.groupTitle} onClick={() => void editGroup(group)}>{group.name}</button><small>{group.content_type === 'module' ? moduleNotes.length : groupItems.length}</small><div>{group.content_type === 'standard' ? <button aria-label={`${group.name} grubuna ekle`} title="Gruba ekle" onClick={() => setEditor({ groupId: group.id, initialKind: defaultKindForGroup(group.id) })}>＋</button> : group.module_key === 'notes' ? <button aria-label={`${group.name} grubuna not ekle`} title="Not ekle" onClick={() => setNoteEditor({ groupId: group.id })}>＋</button> : null}</div></header>
+      {group.content_type === 'module' && group.module_key === 'notes' ? <NotesModule notes={moduleNotes} onOpen={(note) => setNoteEditor({ groupId: group.id, note })} onAdd={() => setNoteEditor({ groupId: group.id })} /> : <>{groupItems.map((item) => renderItem(item, depth + 1))}{children.map((child) => renderGroup(child, depth + 1))}</>}
     </section>;
   }
 
@@ -308,8 +338,23 @@ export function PlannerShell({ user }: { user: User }) {
     {metricTarget && <MetricEntryModal target={metricTarget} onClose={() => setMetricTarget(null)} onSave={saveMetric} />}
     {focusSnapshot && <div className={styles.overlay} onMouseDown={() => setFocusSnapshot(null)}><section className={`${styles.dialog} ${styles.focusDialog}`} role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><div className={styles.dialogTop}><span>{new Intl.DateTimeFormat('tr-TR', { dateStyle: 'long' }).format(parseDate(selectedDate))}</span><button onClick={() => setFocusSnapshot(null)}>×</button></div><h2>{agendaTitle}</h2><p>{focusSnapshot.filter((entry) => entry.status === 'planned').length} item seni bekliyor.</p>{focusSlots.map((slot) => <div className={styles.focusSlot} key={slot.id}><header><i style={{ background: slot.color ?? palette[0] }} /><strong>{slot.name}</strong><span>{shortTime(slot.start_time)}–{shortTime(slot.end_time)}</span></header>{slot.entries.map((entry) => { const item = items.find((candidate) => candidate.id === entry.item_id); return <button key={entry.id} className={entry.status === 'done' ? styles.focusDone : ''} onClick={() => { if (entry.status !== 'planned') return; if (entry.source === 'daily' && (item?.activity_tag || item?.estimated_minutes)) setDurationTarget(entry); else void completeAssignment(entry); }}><span className={styles.roundCheck}>{entry.status === 'done' ? '✓' : ''}</span><span><strong>{item?.name}</strong><small>{item?.activity_tag ? `${item.activity_tag}${item.estimated_minutes ? ` · ${item.estimated_minutes} dk` : ''}` : groups.find((group) => group.id === item?.group_id)?.name ?? 'Grupsuz'}</small></span><em>{entry.status === 'done' ? entry.actual_duration_minutes ? `${entry.actual_duration_minutes} dk` : 'Yapıldı' : 'Planlandı'}</em></button>; })}</div>)}{!focusSlots.length && <div className={styles.empty}>Bu gün için planlanmış item yok.</div>}</section></div>}
     {durationTarget && <DurationCompletionModal entry={durationTarget} item={items.find((item) => item.id === durationTarget.item_id)!} onClose={() => setDurationTarget(null)} onComplete={async (minutes) => { await completeAssignment(durationTarget, minutes); setDurationTarget(null); }} />}
+    {noteEditor && <NoteEditorModal note={noteEditor.note} onClose={() => setNoteEditor(null)} onSave={saveNote} onDelete={noteEditor.note ? () => deleteNote(noteEditor.note!) : undefined} />}
     {editor && <ItemEditorModal key={editor.item?.id ?? editor.group?.id ?? `new-${editor.initialKind ?? 'item'}-${editor.groupId ?? 'root'}`} item={editor.item} group={editor.group} initialKind={editor.initialKind} initialGroupId={editor.groupId} groups={groups} activityTags={Array.from(new Set(items.map((item) => item.activity_tag).filter((tag): tag is string => !!tag))).sort((a, b) => a.localeCompare(b, 'tr'))} onClose={() => setEditor(null)} onSave={saveItem} onSaveGroup={saveGroup} onDelete={editor.item ? async () => { if (await deleteItem(editor.item!)) setEditor(null); } : editor.group ? async () => { if (await deleteGroup(editor.group!)) setEditor(null); } : undefined} />}
   </div>;
+}
+
+function NotesModule({ notes, onOpen, onAdd }: { notes: NoteRow[]; onOpen: (note: NoteRow) => void; onAdd: () => void }) {
+  if (!notes.length) return <button className={styles.notesEmpty} onClick={onAdd}><span>＋</span><strong>İlk notunu ekle</strong><small>Bu grup item yerine kendi notlarını tutar.</small></button>;
+  return <div className={styles.notesModule}>{notes.map((note) => <button key={note.id} onClick={() => onOpen(note)}><header><strong>{note.is_pinned && <span>◆</span>}{note.title}</strong><small>{new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'short' }).format(new Date(note.updated_at))}</small></header><p>{note.body || 'İçerik eklenmemiş.'}</p></button>)}</div>;
+}
+
+function NoteEditorModal({ note, onClose, onSave, onDelete }: { note?: NoteRow; onClose: () => void; onSave: (draft: { title: string; body: string; is_pinned: boolean }) => Promise<boolean>; onDelete?: () => Promise<boolean> }) {
+  const [title, setTitle] = useState(note?.title ?? '');
+  const [body, setBody] = useState(note?.body ?? '');
+  const [pinned, setPinned] = useState(note?.is_pinned ?? false);
+  const [busy, setBusy] = useState(false);
+  async function submit(event: FormEvent) { event.preventDefault(); if (!title.trim()) return; setBusy(true); await onSave({ title: title.trim(), body: body.trim(), is_pinned: pinned }); setBusy(false); }
+  return <div className={styles.overlay} onMouseDown={onClose}><form className={`${styles.metricDialog} ${styles.noteDialog}`} onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}><div className={styles.dialogTop}><span>{note ? 'Notu düzenle' : 'Yeni not'}</span><button type="button" onClick={onClose}>×</button></div><h2>{note ? note.title : 'Aklındakini kaydet'}</h2><label>Başlık<div><input value={title} onChange={(event) => setTitle(event.target.value)} autoFocus placeholder="Not başlığı" /></div></label><label>İçerik<textarea value={body} onChange={(event) => setBody(event.target.value)} rows={9} placeholder="Yazmaya başla…" /></label><label className={styles.notePin}><input type="checkbox" checked={pinned} onChange={(event) => setPinned(event.target.checked)} /> Bu notu üstte tut</label><div className={styles.noteActions}>{note && onDelete && <button type="button" className={styles.noteDelete} disabled={busy} onClick={() => void onDelete()}>Sil</button>}<span /><button className={styles.primary} disabled={busy || !title.trim()}>{busy ? 'Kaydediliyor…' : 'Kaydet'}</button></div></form></div>;
 }
 
 function DurationCompletionModal({ item, onClose, onComplete }: { entry: AssignmentRow; item: ItemRow; onClose: () => void; onComplete: (minutes: number) => Promise<void> }) {
