@@ -15,6 +15,7 @@ export type EditableItem = {
   metric_period: 'daily' | 'weekly' | 'monthly' | null;
   activity_tag: string | null;
   estimated_minutes: number | null;
+  is_in_plan: boolean;
 };
 export type ReminderDraft = { reminder_time: string; weekdays: number[]; is_enabled: boolean };
 
@@ -58,6 +59,7 @@ export function ItemEditorModal({ item, group, initialGroupId, initialKind, grou
   const [metricPeriod, setMetricPeriod] = useState<'daily' | 'weekly' | 'monthly'>(item?.metric_period ?? 'daily');
   const [activityTag, setActivityTag] = useState(item?.activity_tag ?? '');
   const [estimatedMinutes, setEstimatedMinutes] = useState(item?.estimated_minutes?.toString() ?? '');
+  const [isInPlan, setIsInPlan] = useState(item?.is_in_plan ?? true);
   const [contentType, setContentType] = useState<'standard' | 'module'>(group?.content_type ?? 'standard');
   const [defaultItemKind, setDefaultItemKind] = useState<ItemKind | null>(group?.default_item_kind ?? null);
   const [defaultTimeSlotId, setDefaultTimeSlotId] = useState(group?.default_time_slot_id ?? '');
@@ -92,7 +94,7 @@ export function ItemEditorModal({ item, group, initialGroupId, initialKind, grou
     if (!name.trim()) return;
     setBusy(true);
     if (kind === 'group') await onSaveGroup({ name: name.trim(), parent_id: groupId, color, background_color: backgroundColor, content_type: contentType, default_item_kind: contentType === 'standard' ? defaultItemKind : null, default_time_slot_id: contentType === 'standard' ? defaultTimeSlotId || null : null, module_key: contentType === 'module' ? 'notes' : null, module_settings: {} });
-    else await onSave({ name: name.trim(), kind, description: description.trim() || null, group_id: groupId, color, metric_unit: kind === 'metric' ? metricUnit.trim() || null : null, metric_period: kind === 'metric' ? metricPeriod : null, activity_tag: kind === 'daily' ? activityTag.trim() || null : null, estimated_minutes: kind === 'daily' && Number(estimatedMinutes) > 0 ? Number(estimatedMinutes) : null }, reminderDrafts);
+    else await onSave({ name: name.trim(), kind, description: description.trim() || null, group_id: groupId, color, metric_unit: kind === 'metric' ? metricUnit.trim() || null : null, metric_period: kind === 'metric' ? metricPeriod : null, activity_tag: kind === 'daily' ? activityTag.trim() || null : null, estimated_minutes: kind === 'daily' && Number(estimatedMinutes) > 0 ? Number(estimatedMinutes) : null, is_in_plan: isInPlan }, reminderDrafts);
     setBusy(false);
   }
 
@@ -127,6 +129,7 @@ export function ItemEditorModal({ item, group, initialGroupId, initialKind, grou
         </div>
 
         {kind !== 'group' && <div className={styles.reminderSection}><div className={styles.reminderHeading}><div><label className={styles.label}>Hatırlatıcılar</label><small>Uygulama açıkken bildirim gönderir.</small></div><button type="button" onClick={() => setReminderDrafts((current) => [...current, { reminder_time: '09:00', weekdays: [0, 1, 2, 3, 4, 5, 6], is_enabled: true }])}>＋ Saat ekle</button></div>{reminderDrafts.map((reminder, index) => <div className={styles.reminderRow} key={`${index}-${reminder.reminder_time}`}><input type="time" value={reminder.reminder_time} onChange={(event) => setReminderDrafts((current) => current.map((candidate, candidateIndex) => candidateIndex === index ? { ...candidate, reminder_time: event.target.value } : candidate))} /><div>{['Pz', 'Pt', 'Sa', 'Ça', 'Pe', 'Cu', 'Ct'].map((day, dayIndex) => <button type="button" key={day} className={reminder.weekdays.includes(dayIndex) ? styles.reminderDayActive : ''} onClick={() => setReminderDrafts((current) => current.map((candidate, candidateIndex) => candidateIndex === index ? { ...candidate, weekdays: candidate.weekdays.includes(dayIndex) ? candidate.weekdays.filter((value) => value !== dayIndex) : [...candidate.weekdays, dayIndex].sort() } : candidate))}>{day}</button>)}</div><button type="button" aria-label="Hatırlatıcıyı sil" onClick={() => setReminderDrafts((current) => current.filter((_, candidateIndex) => candidateIndex !== index))}>×</button></div>)}</div>}
+        {kind !== 'group' && <label className={styles.checkboxLabel}><input type="checkbox" checked={isInPlan} onChange={(event) => setIsInPlan(event.target.checked)} /><span><strong>Planda göster</strong><span className={styles.checkboxHint}>Kapalıysa item Kütüphanede kalır; ana Plan ekranında görünmez.</span></span></label>}
 
         <label className={styles.label}>Renk</label>
         <div className={styles.colorGrid}>{colors.map((option) => <button key={option} type="button" aria-label={`Renk ${option}`} className={`${styles.colorDot} ${color === option ? styles.selectedColor : ''}`} style={{ background: option }} onClick={() => setColor(option)} />)}</div>

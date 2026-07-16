@@ -13,6 +13,7 @@ export function AppMenu({
   active,
   view,
   onViewChange,
+  onOpenLibrary,
   notificationPermission,
   onEnableNotifications,
   onManageSlots,
@@ -21,6 +22,7 @@ export function AppMenu({
   active: 'calendar' | 'analytics';
   view?: CalendarView;
   onViewChange?: (view: CalendarView) => void;
+  onOpenLibrary?: () => void;
   notificationPermission?: NotificationPermission | 'unsupported';
   onEnableNotifications?: () => void;
   onManageSlots?: () => void;
@@ -45,6 +47,7 @@ export function AppMenu({
       </div>
       <div className={styles.menuSection}>
         <small>Momentum</small>
+        {onOpenLibrary && <button onClick={() => { onOpenLibrary(); close(); }}><span>▦</span> Kütüphane</button>}
         <Link className={active === 'analytics' ? styles.menuActive : ''} href="/analytics" onClick={close}><span>⌁</span> Analitik</Link>
         {onEnableNotifications && <button onClick={() => { onEnableNotifications(); close(); }}><span>◉</span> {notificationPermission === 'granted' ? 'Bildirimler açık' : notificationPermission === 'denied' ? 'Bildirimler engelli' : notificationPermission === 'unsupported' ? 'Bildirim desteklenmiyor' : 'Bildirimleri aç'}</button>}
         {onManageSlots && <button onClick={() => { onManageSlots(); close(); }}><span>◷</span> Zaman dilimleri</button>}
