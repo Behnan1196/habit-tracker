@@ -13,12 +13,16 @@ export function AppMenu({
   active,
   view,
   onViewChange,
+  notificationPermission,
+  onEnableNotifications,
   onManageSlots,
 }: {
   user: User;
   active: 'calendar' | 'analytics';
   view?: CalendarView;
   onViewChange?: (view: CalendarView) => void;
+  notificationPermission?: NotificationPermission | 'unsupported';
+  onEnableNotifications?: () => void;
   onManageSlots?: () => void;
 }) {
   const supabase = useMemo(() => createClient(), []);
@@ -42,6 +46,7 @@ export function AppMenu({
       <div className={styles.menuSection}>
         <small>Momentum</small>
         <Link className={active === 'analytics' ? styles.menuActive : ''} href="/analytics" onClick={close}><span>⌁</span> Analitik</Link>
+        {onEnableNotifications && <button onClick={() => { onEnableNotifications(); close(); }}><span>◉</span> {notificationPermission === 'granted' ? 'Bildirimler açık' : notificationPermission === 'denied' ? 'Bildirimler engelli' : notificationPermission === 'unsupported' ? 'Bildirim desteklenmiyor' : 'Bildirimleri aç'}</button>}
         {onManageSlots && <button onClick={() => { onManageSlots(); close(); }}><span>◷</span> Zaman dilimleri</button>}
       </div>
       <button className={styles.menuSignOut} onClick={() => void supabase.auth.signOut()}><span>↗</span> Çıkış yap</button>

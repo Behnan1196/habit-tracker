@@ -4,7 +4,7 @@ import type { User } from '@supabase/supabase-js';
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { ItemKind, PlanStatus } from '@/types/domain';
-import { ItemEditorModal, type EditableGroup, type EditableItem } from './item-editor-modal';
+import { ItemEditorModal, type EditableGroup, type EditableItem, type ReminderDraft } from './item-editor-modal';
 import { AppMenu, type CalendarView } from './app-menu';
 import styles from './planner-shell.module.css';
 
@@ -15,6 +15,7 @@ type AssignmentRow = { id: string; item_id: string; time_slot_id: string; plan_d
 type PersistentRow = { item_id: string; status: PlanStatus; time_slot_id: string | null };
 type MetricRow = { id: string; item_id: string; entry_date: string; value: number; note: string | null };
 type NoteRow = { id: string; group_id: string; title: string; body: string; is_pinned: boolean; created_at: string; updated_at: string };
+type ReminderRow = ReminderDraft & { id: string; item_id: string };
 
 const palette = ['#395f47', '#638169', '#667e99', '#8d76a4', '#ad765e', '#b18a4f'];
 
@@ -57,6 +58,7 @@ export function PlannerShell({ user }: { user: User }) {
   const [persistent, setPersistent] = useState<PersistentRow[]>([]);
   const [metrics, setMetrics] = useState<MetricRow[]>([]);
   const [notes, setNotes] = useState<NoteRow[]>([]);
+  const [reminders, setReminders] = useState<ReminderRow[]>([]);
   const [planTarget, setPlanTarget] = useState<{ item: ItemRow; date: string } | null>(null);
   const [persistentTarget, setPersistentTarget] = useState<ItemRow | null>(null);
   const [metricTarget, setMetricTarget] = useState<{ item: ItemRow; date: string; entry?: MetricRow } | null>(null);
@@ -66,6 +68,7 @@ export function PlannerShell({ user }: { user: User }) {
   const [slotManagerOpen, setSlotManagerOpen] = useState(false);
   const [noteEditor, setNoteEditor] = useState<{ groupId: string; note?: NoteRow } | null>(null);
   const [groupPlanTarget, setGroupPlanTarget] = useState<GroupRow | null>(null);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>('unsupported');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const weekDates = useMemo(() => Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)), [weekStart]);
@@ -74,7 +77,7 @@ export function PlannerShell({ user }: { user: User }) {
   const weekStartKey = isoDate(weekStart);
 
   const loadData = useCallback(async () => {
-    const [groupResult, itemResult, slotResult, assignmentResult, persistentResult, metricResult, noteResult] = await Promise.all([
+    const [groupResult, itemResult, slotResult, assignmentResult, persistentResult, metricResult, noteResult, reminderResult] = await Promise.all([
       supabase.from('m_groups').select('id,parent_id,name,color,background_color,position,content_type,default_item_kind,default_time_slot_id,module_key,module_settings').order('position'),
       supabase.from('m_items').select('id,group_id,kind,name,description,color,metric_unit,metric_period,activity_tag,estimated_minutes,position').eq('is_active', true).order('position'),
       supabase.from('m_time_slots').select('id,name,start_time,end_time,color,position,is_active').order('position'),
@@ -82,8 +85,9 @@ export function PlannerShell({ user }: { user: User }) {
       supabase.from('m_persistent_states').select('item_id,status,time_slot_id').neq('status', 'cancelled'),
       supabase.from('m_metric_entries').select('id,item_id,entry_date,value,note').gte('entry_date', weekStartKey).lte('entry_date', weekEnd),
       supabase.from('m_notes').select('id,group_id,title,body,is_pinned,created_at,updated_at').order('is_pinned', { ascending: false }).order('updated_at', { ascending: false }),
+      supabase.from('m_reminders').select('id,item_id,reminder_time,weekdays,is_enabled').order('reminder_time'),
     ]);
-    const results = [groupResult, itemResult, slotResult, assignmentResult, persistentResult, metricResult, noteResult];
+    const results = [groupResult, itemResult, slotResult, assignmentResult, persistentResult, metricResult, noteResult, reminderResult];
     const firstError = results.find((result) => result.error)?.error;
     if (firstError) setError(firstError.message);
     else {
@@ -91,6 +95,7 @@ export function PlannerShell({ user }: { user: User }) {
       setSlots((slotResult.data ?? []) as SlotRow[]); setAssignments((assignmentResult.data ?? []) as AssignmentRow[]);
       setPersistent((persistentResult.data ?? []) as PersistentRow[]); setMetrics((metricResult.data ?? []) as MetricRow[]);
       setNotes((noteResult.data ?? []) as NoteRow[]);
+      setReminders((reminderResult.data ?? []) as ReminderRow[]);
     }
     setLoading(false);
   }, [supabase, weekEnd, weekStartKey]);
@@ -102,7 +107,32 @@ export function PlannerShell({ user }: { user: User }) {
 
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get('view') === 'weekly') queueMicrotask(() => setView('weekly'));
+    if ('Notification' in window) queueMicrotask(() => setNotificationPermission(Notification.permission));
   }, []);
+
+  useEffect(() => {
+    if (notificationPermission !== 'granted' || !reminders.length) return;
+    function checkReminders() {
+      const now = new Date();
+      const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      reminders.filter((reminder) => reminder.is_enabled && reminder.weekdays.includes(now.getDay()) && reminder.reminder_time.slice(0, 5) === time).forEach((reminder) => {
+        const key = `momentum-reminder-${reminder.id}-${isoDate(now)}-${time}`;
+        if (localStorage.getItem(key)) return;
+        const item = items.find((candidate) => candidate.id === reminder.item_id);
+        if (!item) return;
+        new Notification(item.name, { body: item.description || 'Momentum hatırlatıcısı', icon: '/icon' });
+        localStorage.setItem(key, new Date().toISOString());
+      });
+    }
+    checkReminders();
+    const timer = window.setInterval(checkReminders, 15000);
+    return () => window.clearInterval(timer);
+  }, [items, notificationPermission, reminders]);
+
+  async function enableNotifications() {
+    if (!('Notification' in window)) { setNotificationPermission('unsupported'); return; }
+    setNotificationPermission(await Notification.requestPermission());
+  }
 
   function changeView(nextView: CalendarView) {
     setView(nextView);
@@ -156,7 +186,16 @@ export function PlannerShell({ user }: { user: User }) {
     await loadData(); return true;
   }
 
-  async function saveItem(draft: Omit<EditableItem, 'id'>) {
+  async function replaceReminders(itemId: string, drafts: ReminderDraft[]) {
+    const removed = await supabase.from('m_reminders').delete().eq('item_id', itemId);
+    if (removed.error) return removed.error;
+    const uniqueDrafts = Array.from(new Map(drafts.filter((draft) => draft.reminder_time && draft.weekdays.length).map((draft) => [draft.reminder_time, draft])).values());
+    if (!uniqueDrafts.length) return null;
+    const inserted = await supabase.from('m_reminders').insert(uniqueDrafts.map((draft) => ({ ...draft, reminder_time: draft.reminder_time, item_id: itemId, user_id: user.id })));
+    return inserted.error;
+  }
+
+  async function saveItem(draft: Omit<EditableItem, 'id'>, reminderDrafts: ReminderDraft[]) {
     if (editor?.group) {
       const oldGroup = editor.group;
       const childItemIds = items.filter((item) => item.group_id === oldGroup.id).map((item) => item.id);
@@ -182,10 +221,15 @@ export function PlannerShell({ user }: { user: User }) {
         await supabase.from('m_items').delete().eq('id', created.data.id);
         return setError(removed.error.message);
       }
+      const reminderError = await replaceReminders(created.data.id, reminderDrafts);
+      if (reminderError) return setError(reminderError.message);
       setEditor(null); await loadData(); return;
     }
-    const result = editor?.item ? await supabase.from('m_items').update(draft).eq('id', editor.item.id) : await supabase.from('m_items').insert({ ...draft, user_id: user.id, position: items.length });
-    if (result.error) setError(result.error.message); else { setEditor(null); await loadData(); }
+    const result = editor?.item ? await supabase.from('m_items').update(draft).eq('id', editor.item.id).select('id').single() : await supabase.from('m_items').insert({ ...draft, user_id: user.id, position: items.length }).select('id').single();
+    if (result.error) setError(result.error.message); else {
+      const reminderError = await replaceReminders(result.data.id, reminderDrafts);
+      if (reminderError) setError(reminderError.message); else { setEditor(null); await loadData(); }
+    }
   }
 
   async function saveGroup(draft: Omit<EditableGroup, 'id'>) {
@@ -406,7 +450,7 @@ export function PlannerShell({ user }: { user: User }) {
   return <div className={styles.app}>
     <main className={styles.mainWide}>
       {error && <button className={styles.errorBanner} onClick={() => setError('')}>{error} ×</button>}
-      <div className={styles.stickyTop}><header className={styles.header}><div className={styles.compactBrand}><span>M</span><strong>Momentum</strong></div><div className={styles.headerActions}><button className={styles.focusButton} onClick={openFocus}><span className={styles.focusDot}>▤</span> {agendaTitle} <b>{focusPlannedCount}</b></button><AppMenu user={user} active="calendar" view={view} onViewChange={changeView} onManageSlots={() => setSlotManagerOpen(true)} /></div></header></div>
+      <div className={styles.stickyTop}><header className={styles.header}><div className={styles.compactBrand}><span>M</span><strong>Momentum</strong></div><div className={styles.headerActions}><button className={styles.focusButton} onClick={openFocus}><span className={styles.focusDot}>▤</span> {agendaTitle} <b>{focusPlannedCount}</b></button><AppMenu user={user} active="calendar" view={view} onViewChange={changeView} notificationPermission={notificationPermission} onEnableNotifications={() => void enableNotifications()} onManageSlots={() => setSlotManagerOpen(true)} /></div></header></div>
       <section className={`${styles.calendarBoard} ${view === 'daily' ? styles.dailyView : ''}`}>
         <div className={styles.calendarScroller}>
           <div className={styles.calendarToolbar}><button aria-label={view === 'daily' ? 'Önceki gün' : 'Önceki hafta'} onClick={() => movePeriod(-1)}>‹</button><button className={styles.toolbarDate} onClick={() => { const today = new Date(); setWeekStart(mondayOf(today)); setSelectedDate(isoDate(today)); }}><strong>{view === 'daily' ? new Intl.DateTimeFormat('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' }).format(parseDate(selectedDate)) : <>{new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'short' }).format(weekStart)} – {new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'short' }).format(weekDates[6])}</>}</strong><small>Bugüne dön</small></button><button aria-label={view === 'daily' ? 'Sonraki gün' : 'Sonraki hafta'} onClick={() => movePeriod(1)}>›</button><button className={styles.headerAdd} aria-label="Grup veya item ekle" title="Grup veya item ekle" onClick={() => setEditor({ groupId: null })}>＋</button></div>
@@ -423,7 +467,7 @@ export function PlannerShell({ user }: { user: User }) {
     {durationTarget && <DurationCompletionModal entry={durationTarget} item={items.find((item) => item.id === durationTarget.item_id)!} onClose={() => setDurationTarget(null)} onComplete={async (minutes) => { await completeAssignment(durationTarget, minutes); setDurationTarget(null); }} />}
     {groupPlanTarget && <GroupPlanModal group={groupPlanTarget} itemCount={plannableItemsForGroup(groupPlanTarget.id).length} slots={activeSlots} date={selectedDate} onClose={() => setGroupPlanTarget(null)} onPlan={(slotId) => planGroup(groupPlanTarget, slotId)} />}
     {noteEditor && <NoteEditorModal note={noteEditor.note} onClose={() => setNoteEditor(null)} onSave={saveNote} onDelete={noteEditor.note ? () => deleteNote(noteEditor.note!) : undefined} />}
-    {editor && <ItemEditorModal key={editor.item?.id ?? editor.group?.id ?? `new-${editor.initialKind ?? 'item'}-${editor.groupId ?? 'root'}`} item={editor.item} group={editor.group} initialKind={editor.initialKind} initialGroupId={editor.groupId} groups={groups} slots={activeSlots} activityTags={Array.from(new Set(items.map((item) => item.activity_tag).filter((tag): tag is string => !!tag))).sort((a, b) => a.localeCompare(b, 'tr'))} onClose={() => setEditor(null)} onSave={saveItem} onSaveGroup={saveGroup} onDelete={editor.item ? async () => { if (await deleteItem(editor.item!)) setEditor(null); } : editor.group ? async () => { if (await deleteGroup(editor.group!)) setEditor(null); } : undefined} />}
+    {editor && <ItemEditorModal key={editor.item?.id ?? editor.group?.id ?? `new-${editor.initialKind ?? 'item'}-${editor.groupId ?? 'root'}`} item={editor.item} group={editor.group} initialKind={editor.initialKind} initialGroupId={editor.groupId} groups={groups} slots={activeSlots} reminders={editor.item ? reminders.filter((reminder) => reminder.item_id === editor.item!.id).map(({ reminder_time, weekdays, is_enabled }) => ({ reminder_time: reminder_time.slice(0, 5), weekdays, is_enabled })) : []} activityTags={Array.from(new Set(items.map((item) => item.activity_tag).filter((tag): tag is string => !!tag))).sort((a, b) => a.localeCompare(b, 'tr'))} onClose={() => setEditor(null)} onSave={saveItem} onSaveGroup={saveGroup} onDelete={editor.item ? async () => { if (await deleteItem(editor.item!)) setEditor(null); } : editor.group ? async () => { if (await deleteGroup(editor.group!)) setEditor(null); } : undefined} />}
   </div>;
 }
 

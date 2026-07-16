@@ -8,6 +8,9 @@ const geistMono = Geist_Mono({ subsets: ['latin'], variable: '--font-mono' });
 export const metadata: Metadata = {
   title: 'Momentum — Günlük Planlayıcı',
   description: 'Rutinlerini, görevlerini ve metriklerini tek bir günlük akışta yönet.',
+  applicationName: 'Momentum',
+  appleWebApp: { capable: true, statusBarStyle: 'default', title: 'Momentum' },
+  formatDetection: { telephone: false },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
