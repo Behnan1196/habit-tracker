@@ -4,6 +4,7 @@ import type { User } from '@supabase/supabase-js';
 import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { AppMenu } from './app-menu';
+import { BottomNav } from './bottom-nav';
 import styles from './planner-shell.module.css';
 
 type GroupRow = { id: string; parent_id: string | null; name: string };
@@ -17,7 +18,7 @@ function isoDate(date: Date) {
 }
 
 export function InsightsShell({ user }: { user: User }) {
-  return <div className={styles.app}><Analytics user={user} /></div>;
+  return <div className={styles.app}><Analytics user={user} /><BottomNav active="analytics" /></div>;
 }
 
 function Analytics({ user }: { user: User }) {
