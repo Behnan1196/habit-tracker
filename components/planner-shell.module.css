@@ -109,3 +109,19 @@
 .noteDelete { padding: 10px 12px; border: 1px solid #edd0c7; border-radius: 9px; color: #9b4d3a; background: #fff5f1; cursor: pointer; }
 
 @media (max-width: 520px) { .notesModule { grid-template-columns: 1fr 1fr; gap: 6px; padding: 7px; }.notesModule > button { min-height: 92px; padding: 10px; } }
+.dailyStatusCell { position: relative; padding: 4px; display: flex; align-items: stretch; justify-content: center; cursor: default; }
+.assignmentList { min-width: 0; width: 100%; display: grid; gap: 3px; }
+.assignmentList > div { min-width: 0; display: grid; grid-template-columns: minmax(52px, auto) minmax(0, 1fr) 20px; align-items: center; overflow: hidden; border: 1px solid #e3e7e1; border-radius: 7px; background: #fff; }
+.assignmentList button, .quickPlan, .addAssignment { border: 0; background: transparent; cursor: pointer; }
+.assignmentState { height: 29px; padding: 0 7px; color: var(--orange); font-size: 8px; text-align: left; }.assignmentDone .assignmentState { color: var(--accent); }
+.assignmentSlot { min-width: 0; overflow: hidden; padding: 0 4px; color: var(--muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.assignmentCancel { height: 25px; color: #a77a6c; font-size: 14px; }
+.persistentCell { display: grid; grid-template-columns: minmax(58px, auto) minmax(0, 1fr) 22px; padding: 5px; gap: 2px; }
+.persistentCell button { min-width: 0; border: 0; background: transparent; cursor: pointer; }.persistentState { color: inherit; text-align: left; font-size: 9px; }.persistentSlot { overflow: hidden; color: var(--muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.quickPlan { width: 100%; display: grid; place-content: center; gap: 2px; color: var(--muted); }.quickPlan strong { font-size: 9px; }.quickPlan small { font-size: 8px; }
+.addAssignment { width: 20px; flex: 0 0 20px; color: var(--accent); font-size: 14px; }
+.focusEntry { display: grid; grid-template-columns: minmax(0, 1fr) 30px 30px; align-items: center; border-top: 1px solid #eceee9; background: white; }
+.focusState { min-width: 0; padding: 13px 8px; display: flex; align-items: center; gap: 11px; border: 0; background: transparent; text-align: left; cursor: pointer; }
+.focusState > span:nth-child(2) { min-width: 0; display: grid; }.focusState strong { font-size: 13px; }.focusState small { color: var(--muted); font-size: 10px; }.focusState em { margin-left: auto; color: var(--orange); font-size: 10px; font-style: normal; }
+.focusMove, .focusCancel { width: 28px; height: 28px; border: 0; border-radius: 7px; color: var(--muted); background: #f3f5f1; cursor: pointer; }.focusCancel { color: #9b5c48; }
+.focusDone .focusState { opacity: .62; }.focusDone .roundCheck { color: white; border-color: var(--accent); background: var(--accent); }.focusDone .focusState em { color: var(--accent); }

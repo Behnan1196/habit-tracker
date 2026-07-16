@@ -17,7 +17,8 @@ export type EditableItem = {
   estimated_minutes: number | null;
 };
 
-type GroupOption = { id: string; parent_id: string | null; name: string; content_type: 'standard' | 'module'; default_item_kind: ItemKind | null; module_key: string | null; module_settings: Record<string, unknown> };
+type GroupOption = { id: string; parent_id: string | null; name: string; content_type: 'standard' | 'module'; default_item_kind: ItemKind | null; default_time_slot_id: string | null; module_key: string | null; module_settings: Record<string, unknown> };
+type SlotOption = { id: string; name: string; start_time: string | null; end_time: string | null };
 type ItemDraft = Omit<EditableItem, 'id'>;
 export type EditableGroup = GroupOption & { color: string | null; background_color: string | null };
 type GroupDraft = Omit<EditableGroup, 'id'>;
@@ -32,12 +33,13 @@ function readableText(background: string) {
   return (red * 299 + green * 587 + blue * 114) / 1000 > 150 ? '#18201a' : '#ffffff';
 }
 
-export function ItemEditorModal({ item, group, initialGroupId, initialKind, groups, activityTags, onClose, onSave, onSaveGroup, onDelete }: {
+export function ItemEditorModal({ item, group, initialGroupId, initialKind, groups, slots, activityTags, onClose, onSave, onSaveGroup, onDelete }: {
   item?: EditableItem;
   group?: EditableGroup;
   initialGroupId: string | null;
   initialKind?: EditorKind;
   groups: GroupOption[];
+  slots: SlotOption[];
   activityTags: string[];
   onClose: () => void;
   onSave: (draft: ItemDraft) => Promise<void>;
@@ -56,6 +58,7 @@ export function ItemEditorModal({ item, group, initialGroupId, initialKind, grou
   const [estimatedMinutes, setEstimatedMinutes] = useState(item?.estimated_minutes?.toString() ?? '');
   const [contentType, setContentType] = useState<'standard' | 'module'>(group?.content_type ?? 'standard');
   const [defaultItemKind, setDefaultItemKind] = useState<ItemKind | null>(group?.default_item_kind ?? null);
+  const [defaultTimeSlotId, setDefaultTimeSlotId] = useState(group?.default_time_slot_id ?? '');
   const [busy, setBusy] = useState(false);
 
   function inheritedKind(targetGroupId: string | null): ItemKind {
@@ -85,7 +88,7 @@ export function ItemEditorModal({ item, group, initialGroupId, initialKind, grou
     event.preventDefault();
     if (!name.trim()) return;
     setBusy(true);
-    if (kind === 'group') await onSaveGroup({ name: name.trim(), parent_id: groupId, color, background_color: backgroundColor, content_type: contentType, default_item_kind: contentType === 'standard' ? defaultItemKind : null, module_key: contentType === 'module' ? 'notes' : null, module_settings: {} });
+    if (kind === 'group') await onSaveGroup({ name: name.trim(), parent_id: groupId, color, background_color: backgroundColor, content_type: contentType, default_item_kind: contentType === 'standard' ? defaultItemKind : null, default_time_slot_id: contentType === 'standard' ? defaultTimeSlotId || null : null, module_key: contentType === 'module' ? 'notes' : null, module_settings: {} });
     else await onSave({ name: name.trim(), kind, description: description.trim() || null, group_id: groupId, color, metric_unit: kind === 'metric' ? metricUnit.trim() || null : null, metric_period: kind === 'metric' ? metricPeriod : null, activity_tag: kind === 'daily' ? activityTag.trim() || null : null, estimated_minutes: kind === 'daily' && Number(estimatedMinutes) > 0 ? Number(estimatedMinutes) : null });
     setBusy(false);
   }
@@ -113,6 +116,7 @@ export function ItemEditorModal({ item, group, initialGroupId, initialKind, grou
           <div><label className={styles.label} htmlFor="item-group">{kind === 'group' ? 'Üst grup' : 'Grup'}</label><select id="item-group" className={styles.select} value={groupId ?? ''} onChange={(event) => { const nextGroupId = event.target.value || null; setGroupId(nextGroupId); if (!item && !group && kind !== 'group') setKind(inheritedKind(nextGroupId)); }}><option value="">{kind === 'group' ? 'Ana seviye' : 'Grupsuz'}</option>{groupOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></div>
           {kind === 'group' && <div><label className={styles.label} htmlFor="group-content">İçerik</label><select id="group-content" className={styles.select} value={contentType} onChange={(event) => setContentType(event.target.value as 'standard' | 'module')}><option value="standard">Standart grup</option><option value="module">Notlar modülü</option></select></div>}
           {kind === 'group' && contentType === 'standard' && <div><label className={styles.label} htmlFor="default-item-kind">Varsayılan item tipi</label><select id="default-item-kind" className={styles.select} value={defaultItemKind ?? ''} onChange={(event) => setDefaultItemKind((event.target.value || null) as ItemKind | null)}><option value="">{groupId ? 'Üst gruptan devral' : 'Belirtilmedi (Günlük)'}</option><option value="daily">Günlük</option><option value="persistent">Sabit</option><option value="metric">Metrik</option></select></div>}
+          {kind === 'group' && contentType === 'standard' && <div><label className={styles.label} htmlFor="default-time-slot">Varsayılan zaman dilimi</label><select id="default-time-slot" className={styles.select} value={defaultTimeSlotId} onChange={(event) => setDefaultTimeSlotId(event.target.value)}><option value="">{groupId ? 'Üst gruptan devral' : 'Belirtilmedi'}</option>{slots.map((slot) => <option key={slot.id} value={slot.id}>{slot.name}</option>)}</select></div>}
           {kind === 'metric' && <div><label className={styles.label} htmlFor="metric-unit">Birim</label><input id="metric-unit" className={styles.input} value={metricUnit} onChange={(event) => setMetricUnit(event.target.value)} placeholder="kg, cm, saat…" /></div>}
           {kind === 'metric' && <div><label className={styles.label} htmlFor="metric-period">Ölçüm periyodu</label><select id="metric-period" className={styles.select} value={metricPeriod} onChange={(event) => setMetricPeriod(event.target.value as 'daily' | 'weekly' | 'monthly')}><option value="daily">Günlük</option><option value="weekly">Haftalık</option><option value="monthly">Aylık</option></select></div>}
           {kind === 'daily' && <div><label className={styles.label} htmlFor="activity-tag">Aktivite etiketi</label><input id="activity-tag" className={styles.input} list="activity-tags" value={activityTag} onChange={(event) => setActivityTag(event.target.value)} placeholder="Örn. Egzersiz" /><datalist id="activity-tags">{activityTags.map((tag) => <option key={tag} value={tag} />)}</datalist></div>}
