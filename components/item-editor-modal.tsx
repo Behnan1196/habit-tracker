@@ -35,11 +35,12 @@ function readableText(background: string) {
   return (red * 299 + green * 587 + blue * 114) / 1000 > 150 ? '#18201a' : '#ffffff';
 }
 
-export function ItemEditorModal({ item, group, initialGroupId, initialKind, groups, slots, reminders, activityTags, onClose, onSave, onSaveGroup, onDelete }: {
+export function ItemEditorModal({ item, group, initialGroupId, initialKind, initialIsInPlan = true, groups, slots, reminders, activityTags, onClose, onSave, onSaveGroup, onDelete }: {
   item?: EditableItem;
   group?: EditableGroup;
   initialGroupId: string | null;
   initialKind?: EditorKind;
+  initialIsInPlan?: boolean;
   groups: GroupOption[];
   slots: SlotOption[];
   reminders: ReminderDraft[];
@@ -59,7 +60,7 @@ export function ItemEditorModal({ item, group, initialGroupId, initialKind, grou
   const [metricPeriod, setMetricPeriod] = useState<'daily' | 'weekly' | 'monthly'>(item?.metric_period ?? 'daily');
   const [activityTag, setActivityTag] = useState(item?.activity_tag ?? '');
   const [estimatedMinutes, setEstimatedMinutes] = useState(item?.estimated_minutes?.toString() ?? '');
-  const [isInPlan, setIsInPlan] = useState(item?.is_in_plan ?? true);
+  const [isInPlan, setIsInPlan] = useState(item?.is_in_plan ?? initialIsInPlan);
   const [contentType, setContentType] = useState<'standard' | 'module'>(group?.content_type ?? 'standard');
   const [defaultItemKind, setDefaultItemKind] = useState<ItemKind | null>(group?.default_item_kind ?? null);
   const [defaultTimeSlotId, setDefaultTimeSlotId] = useState(group?.default_time_slot_id ?? '');
