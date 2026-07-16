@@ -13,6 +13,8 @@ export function AppMenu({
   active,
   view,
   onViewChange,
+  workspace,
+  onWorkspaceChange,
   onOpenLibrary,
   notificationPermission,
   onEnableNotifications,
@@ -22,6 +24,8 @@ export function AppMenu({
   active: 'calendar' | 'analytics';
   view?: CalendarView;
   onViewChange?: (view: CalendarView) => void;
+  workspace?: 'plan' | 'library';
+  onWorkspaceChange?: (workspace: 'plan' | 'library') => void;
   onOpenLibrary?: () => void;
   notificationPermission?: NotificationPermission | 'unsupported';
   onEnableNotifications?: () => void;
@@ -47,7 +51,10 @@ export function AppMenu({
       </div>
       <div className={styles.menuSection}>
         <small>Momentum</small>
-        {onOpenLibrary && <button onClick={() => { onOpenLibrary(); close(); }}><span>▦</span> Kütüphane</button>}
+        {onWorkspaceChange ? <>
+          <button className={workspace === 'plan' ? styles.menuActive : ''} onClick={() => { onWorkspaceChange('plan'); close(); }}><span>▤</span> Plan</button>
+          <button className={workspace === 'library' ? styles.menuActive : ''} onClick={() => { onWorkspaceChange('library'); close(); }}><span>▦</span> Kütüphane</button>
+        </> : onOpenLibrary && <button onClick={() => { onOpenLibrary(); close(); }}><span>▦</span> Kütüphane</button>}
         <Link className={active === 'analytics' ? styles.menuActive : ''} href="/analytics" onClick={close}><span>⌁</span> Analitik</Link>
         {onEnableNotifications && <button onClick={() => { onEnableNotifications(); close(); }}><span>◉</span> {notificationPermission === 'granted' ? 'Bildirimler açık' : notificationPermission === 'denied' ? 'Bildirimler engelli' : notificationPermission === 'unsupported' ? 'Bildirim desteklenmiyor' : 'Bildirimleri aç'}</button>}
         {onManageSlots && <button onClick={() => { onManageSlots(); close(); }}><span>◷</span> Zaman dilimleri</button>}
