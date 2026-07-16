@@ -5,6 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: 'Momentum',
     short_name: 'Momentum',
     description: 'Ritmini planla, uygula ve takip et.',
+    id: '/',
     start_url: '/',
     display: 'standalone',
     background_color: '#f5f5f0',

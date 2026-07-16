@@ -18,6 +18,13 @@ type NoteRow = { id: string; group_id: string; title: string; body: string; is_p
 type ReminderRow = ReminderDraft & { id: string; item_id: string };
 
 const palette = ['#395f47', '#638169', '#667e99', '#8d76a4', '#ad765e', '#b18a4f'];
+const vapidPublicKey = 'BHTVKlF2QiaWSkc4d6yenfMWXKnryir4Yt9wvuGkQRpSGsIhOPTPcaDpbTPt32Er2bZDo1sLySfhK_dkE4QCE8Y';
+
+function pushKey(value: string) {
+  const padding = '='.repeat((4 - value.length % 4) % 4);
+  const base64 = (value + padding).replace(/-/g, '+').replace(/_/g, '/');
+  return Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
+}
 
 function isoDate(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -108,30 +115,25 @@ export function PlannerShell({ user }: { user: User }) {
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get('view') === 'weekly') queueMicrotask(() => setView('weekly'));
     if ('Notification' in window) queueMicrotask(() => setNotificationPermission(Notification.permission));
+    if ('serviceWorker' in navigator) void navigator.serviceWorker.register('/sw.js');
   }, []);
 
-  useEffect(() => {
-    if (notificationPermission !== 'granted' || !reminders.length) return;
-    function checkReminders() {
-      const now = new Date();
-      const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-      reminders.filter((reminder) => reminder.is_enabled && reminder.weekdays.includes(now.getDay()) && reminder.reminder_time.slice(0, 5) === time).forEach((reminder) => {
-        const key = `momentum-reminder-${reminder.id}-${isoDate(now)}-${time}`;
-        if (localStorage.getItem(key)) return;
-        const item = items.find((candidate) => candidate.id === reminder.item_id);
-        if (!item) return;
-        new Notification(item.name, { body: item.description || 'Momentum hatırlatıcısı', icon: '/icon' });
-        localStorage.setItem(key, new Date().toISOString());
-      });
-    }
-    checkReminders();
-    const timer = window.setInterval(checkReminders, 15000);
-    return () => window.clearInterval(timer);
-  }, [items, notificationPermission, reminders]);
-
   async function enableNotifications() {
-    if (!('Notification' in window)) { setNotificationPermission('unsupported'); return; }
-    setNotificationPermission(await Notification.requestPermission());
+    if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) { setNotificationPermission('unsupported'); return; }
+    const permission = await Notification.requestPermission();
+    setNotificationPermission(permission);
+    if (permission !== 'granted') return;
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: pushKey(vapidPublicKey) });
+    const json = subscription.toJSON();
+    const result = await supabase.from('m_push_subscriptions').upsert({
+      user_id: user.id,
+      endpoint: subscription.endpoint,
+      p256dh: json.keys?.p256dh,
+      auth: json.keys?.auth,
+      user_agent: navigator.userAgent,
+    }, { onConflict: 'endpoint' });
+    if (result.error) setError(result.error.message);
   }
 
   function changeView(nextView: CalendarView) {
