@@ -17,6 +17,7 @@ type PersistentRow = { item_id: string; status: PlanStatus; time_slot_id: string
 type MetricRow = { id: string; item_id: string; entry_date: string; value: number; note: string | null };
 type NoteRow = { id: string; group_id: string; title: string; body: string; is_pinned: boolean; created_at: string; updated_at: string };
 type ReminderRow = ReminderDraft & { id: string; item_id: string };
+type ScheduleRow = { id: string; item_id: string; time_slot_id: string; recurrence_type: 'once' | 'daily' | 'weekdays'; weekdays: number[]; start_date: string; end_date: string | null; is_active: boolean };
 
 const palette = ['#395f47', '#638169', '#667e99', '#8d76a4', '#ad765e', '#b18a4f'];
 const vapidPublicKey = 'BHTVKlF2QiaWSkc4d6yenfMWXKnryir4Yt9wvuGkQRpSGsIhOPTPcaDpbTPt32Er2bZDo1sLySfhK_dkE4QCE8Y';
@@ -67,6 +68,8 @@ export function PlannerShell({ user }: { user: User }) {
   const [metrics, setMetrics] = useState<MetricRow[]>([]);
   const [notes, setNotes] = useState<NoteRow[]>([]);
   const [reminders, setReminders] = useState<ReminderRow[]>([]);
+  const [schedules, setSchedules] = useState<ScheduleRow[]>([]);
+  const [scheduleTarget, setScheduleTarget] = useState<ItemRow | null>(null);
   const [planTarget, setPlanTarget] = useState<{ item: ItemRow; date: string } | null>(null);
   const [persistentTarget, setPersistentTarget] = useState<ItemRow | null>(null);
   const [metricTarget, setMetricTarget] = useState<{ item: ItemRow; date: string; entry?: MetricRow } | null>(null);
@@ -88,17 +91,18 @@ export function PlannerShell({ user }: { user: User }) {
   const weekStartKey = isoDate(weekStart);
 
   const loadData = useCallback(async () => {
-    const [groupResult, itemResult, slotResult, assignmentResult, persistentResult, metricResult, noteResult, reminderResult] = await Promise.all([
+    const [groupResult, itemResult, slotResult, assignmentResult, persistentResult, metricResult, noteResult, reminderResult, scheduleResult] = await Promise.all([
       supabase.from('m_groups').select('id,parent_id,name,color,background_color,position,content_type,default_item_kind,default_time_slot_id,module_key,module_settings,is_in_plan').order('position'),
       supabase.from('m_items').select('id,group_id,kind,name,description,color,metric_unit,metric_period,activity_tag,estimated_minutes,is_in_plan,position').eq('is_active', true).order('position'),
       supabase.from('m_time_slots').select('id,name,start_time,end_time,color,position,is_active').order('position'),
-      supabase.from('m_daily_assignments').select('id,item_id,time_slot_id,plan_date,status,actual_duration_minutes').gte('plan_date', weekStartKey).lte('plan_date', weekEnd).neq('status', 'cancelled'),
+      supabase.from('m_daily_assignments').select('id,item_id,time_slot_id,plan_date,status,actual_duration_minutes').gte('plan_date', weekStartKey).lte('plan_date', weekEnd),
       supabase.from('m_persistent_states').select('item_id,status,time_slot_id').neq('status', 'cancelled'),
       supabase.from('m_metric_entries').select('id,item_id,entry_date,value,note').gte('entry_date', weekStartKey).lte('entry_date', weekEnd),
       supabase.from('m_notes').select('id,group_id,title,body,is_pinned,created_at,updated_at').order('is_pinned', { ascending: false }).order('updated_at', { ascending: false }),
       supabase.from('m_reminders').select('id,item_id,reminder_time,weekdays,is_enabled').order('reminder_time'),
+      supabase.from('m_agenda_schedules').select('id,item_id,time_slot_id,recurrence_type,weekdays,start_date,end_date,is_active').eq('is_active', true).order('created_at'),
     ]);
-    const results = [groupResult, itemResult, slotResult, assignmentResult, persistentResult, metricResult, noteResult, reminderResult];
+    const results = [groupResult, itemResult, slotResult, assignmentResult, persistentResult, metricResult, noteResult, reminderResult, scheduleResult];
     const firstError = results.find((result) => result.error)?.error;
     if (firstError) setError(firstError.message);
     else {
@@ -107,9 +111,23 @@ export function PlannerShell({ user }: { user: User }) {
       setPersistent((persistentResult.data ?? []) as PersistentRow[]); setMetrics((metricResult.data ?? []) as MetricRow[]);
       setNotes((noteResult.data ?? []) as NoteRow[]);
       setReminders((reminderResult.data ?? []) as ReminderRow[]);
+      setSchedules((scheduleResult.data ?? []) as ScheduleRow[]);
     }
     setLoading(false);
   }, [supabase, weekEnd, weekStartKey]);
+
+  useEffect(() => {
+    if (!schedules.length) return;
+    const dates = weekDates.map((date) => ({ date, key: isoDate(date) }));
+    const existing = new Set(assignments.map((entry) => `${entry.item_id}:${entry.time_slot_id}:${entry.plan_date}`));
+    const rows = schedules.flatMap((schedule) => dates.filter(({ date, key }) => {
+      if (key < schedule.start_date || (schedule.end_date && key > schedule.end_date)) return false;
+      if (schedule.recurrence_type === 'once') return key === schedule.start_date;
+      if (schedule.recurrence_type === 'weekdays') return schedule.weekdays.includes(date.getDay());
+      return true;
+    }).map(({ key }) => ({ user_id: user.id, item_id: schedule.item_id, time_slot_id: schedule.time_slot_id, plan_date: key, status: 'planned', planned_at: new Date().toISOString(), completed_at: null, cancelled_at: null })).filter((row) => !existing.has(`${row.item_id}:${row.time_slot_id}:${row.plan_date}`)));
+    if (rows.length) void supabase.from('m_daily_assignments').upsert(rows, { onConflict: 'user_id,item_id,time_slot_id,plan_date' }).then(({ error: materializeError }) => materializeError ? setError(materializeError.message) : loadData());
+  }, [assignments, loadData, schedules, supabase, user.id, weekDates]);
 
   useEffect(() => {
     void supabase.from('m_profiles').upsert({ id: user.id, display_name: user.user_metadata?.full_name ?? user.email?.split('@')[0] ?? null }, { onConflict: 'id' });
@@ -450,16 +468,18 @@ export function PlannerShell({ user }: { user: User }) {
     if (result.error) setError(result.error.message); else await loadData();
   }
 
-  async function togglePlanGroup(group: GroupRow) {
-    const result = await supabase.from('m_groups').update({ is_in_plan: !group.is_in_plan }).eq('id', group.id);
-    if (result.error) setError(result.error.message); else await loadData();
+  async function saveSchedule(draft: { time_slot_id: string; recurrence_type: 'once' | 'daily' | 'weekdays'; weekdays: number[]; start_date: string }) {
+    if (!scheduleTarget) return false;
+    const result = await supabase.from('m_agenda_schedules').insert({ ...draft, item_id: scheduleTarget.id, user_id: user.id, is_active: true });
+    if (result.error) { setError(result.error.message); return false; }
+    setScheduleTarget(null); await loadData(); return true;
   }
 
   function renderLibraryItem(item: ItemRow, depth = 0) {
     const hasReminder = reminders.some((reminder) => reminder.item_id === item.id && reminder.is_enabled);
     return <div className={styles.libraryRow} key={item.id} draggable onDragStart={(event) => { event.dataTransfer.setData('text/library-kind', 'item'); event.dataTransfer.setData('text/library-id', item.id); }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); if (event.dataTransfer.getData('text/library-kind') === 'item') void moveBefore('item', event.dataTransfer.getData('text/library-id'), item.id); }}>
       <button className={styles.libraryItemIdentity} style={{ paddingLeft: 8 + Math.min(depth * 12, 36) }} onClick={() => setEditor({ item, groupId: item.group_id })}><span className={styles.libraryDrag}>⠿</span><i style={{ background: item.color ?? palette[0] }} /><span><strong>{item.name}</strong><small>{item.kind === 'metric' ? `Ölçüm${item.metric_unit ? ` · ${item.metric_unit}` : ''}` : item.activity_tag || (item.kind === 'persistent' ? 'Geçici' : 'Aktivite')}{item.estimated_minutes ? ` · ${item.estimated_minutes} dk` : ''}{hasReminder ? ' · 🔔' : ''}</small></span></button>
-      <div className={styles.libraryRowActions}>{item.kind !== 'metric' && <button title="Seçili güne ekle" onClick={() => item.kind === 'persistent' ? void quickPlanPersistent(item) : setPlanTarget({ item, date: selectedDate })}>Bugün</button>}<button className={item.is_in_plan ? styles.libraryInPlan : ''} onClick={() => void togglePlanItem(item)}>{item.is_in_plan ? 'Planda ✓' : 'Plana ekle'}</button></div>
+      <div className={styles.libraryRowActions}>{item.kind !== 'metric' && <button className={schedules.some((schedule) => schedule.item_id === item.id) ? styles.libraryInPlan : ''} onClick={() => setScheduleTarget(item)}>{schedules.some((schedule) => schedule.item_id === item.id) ? 'Ajandada ✓' : 'Ajandaya ekle'}</button>}</div>
     </div>;
   }
 
@@ -467,7 +487,7 @@ export function PlannerShell({ user }: { user: User }) {
     const groupItems = items.filter((item) => item.group_id === group.id).sort((a, b) => a.position - b.position);
     const children = groups.filter((candidate) => candidate.parent_id === group.id).sort((a, b) => a.position - b.position);
     return <section className={styles.libraryGroup} key={group.id} draggable onDragStart={(event) => { event.stopPropagation(); event.dataTransfer.setData('text/library-kind', 'group'); event.dataTransfer.setData('text/library-id', group.id); }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); const kind = event.dataTransfer.getData('text/library-kind'); const id = event.dataTransfer.getData('text/library-id'); if (kind === 'item') void moveItem(id, group.id); else if (kind === 'group') void moveGroup(id, group.id); }}>
-      <header style={{ paddingLeft: 10 + Math.min(depth * 12, 36), background: group.background_color ?? '#f4f5f1', color: readableText(group.background_color ?? '#f4f5f1') }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); const kind = event.dataTransfer.getData('text/library-kind'); const id = event.dataTransfer.getData('text/library-id'); if (kind === 'group') void moveBefore('group', id, group.id); else if (kind === 'item') void moveItem(id, group.id); }}><span className={styles.libraryDrag}>⠿</span><i style={{ background: group.color ?? palette[0] }} /><button className={styles.groupTitle} onClick={() => void editGroup(group)}>{group.name}</button><small>{groupItems.length}</small><div><button className={group.is_in_plan ? styles.libraryInPlan : ''} title={group.is_in_plan ? 'Plandan çıkar' : 'Plana ekle'} onClick={() => void togglePlanGroup(group)}>{group.is_in_plan ? '✓' : '＋'}</button><button title="Gruba ekle" onClick={() => setEditor({ groupId: group.id, initialKind: defaultKindForGroup(group.id), initialIsInPlan: false })}>＋</button></div></header>
+      <header style={{ paddingLeft: 10 + Math.min(depth * 12, 36), background: group.background_color ?? '#f4f5f1', color: readableText(group.background_color ?? '#f4f5f1') }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); const kind = event.dataTransfer.getData('text/library-kind'); const id = event.dataTransfer.getData('text/library-id'); if (kind === 'group') void moveBefore('group', id, group.id); else if (kind === 'item') void moveItem(id, group.id); }}><span className={styles.libraryDrag}>⠿</span><i style={{ background: group.color ?? palette[0] }} /><button className={styles.groupTitle} onClick={() => void editGroup(group)}>{group.name}</button><small>{groupItems.length}</small><div><button title="Gruba ekle" onClick={() => setEditor({ groupId: group.id, initialKind: defaultKindForGroup(group.id), initialIsInPlan: false })}>＋</button></div></header>
       {groupItems.map((item) => renderLibraryItem(item, depth + 1))}{children.map((child) => renderLibraryGroup(child, depth + 1))}
     </section>;
   }
@@ -509,6 +529,20 @@ export function PlannerShell({ user }: { user: User }) {
       {group.content_type === 'module' && group.module_key === 'notes' ? <NotesModule notes={moduleNotes} onOpen={(note) => setNoteEditor({ groupId: group.id, note })} onAdd={() => setNoteEditor({ groupId: group.id })} /> : <>{groupItems.map((item) => renderItem(item, depth + 1))}{children.map((child) => renderGroup(child, depth + 1))}</>}
     </section>;
   }
+  void renderGroup;
+
+  function renderAgendaDay(date: Date) {
+    const key = isoDate(date);
+    const dayEntries = assignments.filter((entry) => entry.plan_date === key && entry.status !== 'cancelled');
+    return <section className={styles.agendaDay} key={key}><header><div><span>{new Intl.DateTimeFormat('tr-TR', { weekday: 'long' }).format(date)}</span><strong>{new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'long' }).format(date)}</strong></div>{view === 'weekly' && <button onClick={() => { setSelectedDate(key); setView('daily'); }}>Günü aç</button>}</header><div className={styles.agendaSlots}>{activeSlots.map((slot) => {
+      const slotEntries = dayEntries.filter((entry) => entry.time_slot_id === slot.id);
+      return <section className={styles.agendaSlotSection} key={slot.id}><header><i style={{ background: slot.color ?? palette[0] }} /><div><strong>{slot.name}</strong><small>{shortTime(slot.start_time)}–{shortTime(slot.end_time)}</small></div><span>{slotEntries.length}</span></header><div>{slotEntries.map((entry) => {
+        const item = items.find((candidate) => candidate.id === entry.item_id);
+        if (!item) return null;
+        return <article className={entry.status === 'done' ? styles.agendaEntryDone : ''} key={entry.id}><button className={styles.agendaEntryState} onClick={() => { setSelectedDate(key); if (entry.status === 'done') void restoreAssignment({ ...entry, source: 'daily' }); else if (item.activity_tag || item.estimated_minutes) setDurationTarget({ ...entry, source: 'daily' }); else void completeAssignment({ ...entry, source: 'daily' }); }}><span>{entry.status === 'done' ? '✓' : ''}</span></button><button className={styles.agendaEntryIdentity} onClick={() => { setSelectedDate(key); setAgendaItemTarget(item); }}><strong>{item.name}</strong><small>{groups.find((group) => group.id === item.group_id)?.name ?? item.activity_tag ?? 'Aktivite'}{item.estimated_minutes ? ` · ${item.estimated_minutes} dk` : ''}</small></button><button className={styles.agendaEntryRemove} aria-label="Bu günden kaldır" onClick={() => void cancelAssignment({ ...entry, source: 'daily' })}>×</button></article>;
+      })}{!slotEntries.length && <button className={styles.agendaSlotEmpty} onClick={() => { setSelectedDate(key); setWorkspace('library'); }}>Kütüphaneden aktivite ekle</button>}</div></section>;
+    })}</div></section>;
+  }
 
   function openAgenda(mode: 'focus' | 'agenda') {
     const dailyEntries = assignments.filter((entry) => entry.plan_date === selectedDate && (mode === 'agenda' || entry.status === 'planned'));
@@ -521,11 +555,6 @@ export function PlannerShell({ user }: { user: User }) {
   const agendaTitle = agendaMode === 'focus' ? 'Focus' : dateAgendaTitle;
   const focusSlots = slots.map((slot) => ({ ...slot, entries: (focusSnapshot ?? []).filter((entry) => entry.time_slot_id === slot.id) })).filter((slot) => slot.entries.length);
 
-  async function togglePlanItem(item: ItemRow) {
-    const result = await supabase.from('m_items').update({ is_in_plan: !item.is_in_plan }).eq('id', item.id);
-    if (result.error) setError(result.error.message); else await loadData();
-  }
-
   if (loading) return <div className={styles.loading}>Planın yükleniyor…</div>;
 
   return <div className={styles.app}>
@@ -534,9 +563,7 @@ export function PlannerShell({ user }: { user: User }) {
       <div className={styles.stickyTop}><header className={styles.header}><div className={styles.compactBrand}><span>M</span><strong>{workspace === 'agenda' ? 'Ajanda' : workspace === 'library' ? 'Kütüphane' : workspace === 'modules' ? 'Modüller' : 'Ayarlar'}</strong></div>{workspace === 'agenda' && <div className={styles.headerActions}><div className={styles.agendaViewSwitch} aria-label="Ajanda görünümü"><button className={view === 'daily' ? styles.agendaViewActive : ''} onClick={() => changeView('daily')}>Günlük</button><button className={view === 'weekly' ? styles.agendaViewActive : ''} onClick={() => changeView('weekly')}>Haftalık</button></div><button className={styles.focusButton} onClick={() => openAgenda('focus')}><span className={styles.focusDot}>●</span> Kalanlar <b>{focusPlannedCount}</b></button></div>}</header></div>
       {(workspace === 'agenda' || workspace === 'library') && <section className={`${styles.calendarBoard} ${workspace === 'agenda' && view === 'daily' ? styles.dailyView : ''} ${workspace === 'library' ? styles.libraryBoard : ''}`}>
         <div className={styles.calendarScroller}>
-          {workspace === 'agenda' ? <><div className={styles.calendarToolbar}><button aria-label={view === 'daily' ? 'Önceki gün' : 'Önceki hafta'} onClick={() => movePeriod(-1)}>‹</button><button className={styles.toolbarDate} onClick={() => { const today = new Date(); setWeekStart(mondayOf(today)); setSelectedDate(isoDate(today)); }}><strong>{view === 'daily' ? new Intl.DateTimeFormat('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' }).format(parseDate(selectedDate)) : <>{new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'short' }).format(weekStart)} – {new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'short' }).format(weekDates[6])}</>}</strong><small>Bugüne dön</small></button><button aria-label={view === 'daily' ? 'Sonraki gün' : 'Sonraki hafta'} onClick={() => movePeriod(1)}>›</button><button className={styles.headerAdd} aria-label="Grup veya item ekle" title="Grup veya item ekle" onClick={() => setEditor({ groupId: null })}>＋</button></div>
-          {view === 'weekly' && <div className={styles.calendarHead}><div />{visibleDates.map((date) => { const key = isoDate(date); return <button key={key} className={selectedDate === key ? styles.selectedDay : ''} onClick={() => setSelectedDate(key)}><span>{new Intl.DateTimeFormat('tr-TR', { weekday: 'short' }).format(date)}</span><strong>{date.getDate()}</strong></button>; })}</div>}
-          <div onDragOver={(event) => event.preventDefault()} onDrop={(event) => void moveItem(event.dataTransfer.getData('text/item-id'), null)}>{groups.filter((group) => group.parent_id === null && group.is_in_plan).map((group) => renderGroup(group))}{items.filter((item) => item.group_id === null && item.is_in_plan).map((item) => renderItem(item))}{!items.some((item) => item.is_in_plan) && <div className={styles.empty}>Planın boş. Kütüphaneden bu dönem kullanmak istediğin aktiviteleri ekleyebilirsin.</div>}</div></> : <><div className={styles.libraryToolbar}><div><strong>Aktivite Kütüphanesi</strong><small>Grupları ve itemları sürükleyerek düzenleyebilirsin.</small></div><button onClick={() => setEditor({ groupId: null, initialKind: 'group', initialIsInPlan: false })}>＋ Grup</button><button onClick={() => setEditor({ groupId: null, initialKind: 'daily', initialIsInPlan: false })}>＋ Item</button></div><div className={styles.libraryTree} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { const kind = event.dataTransfer.getData('text/library-kind'); const id = event.dataTransfer.getData('text/library-id'); if (kind === 'item') void moveItem(id, null); else if (kind === 'group') void moveGroup(id, null); }}>{groups.filter((group) => group.parent_id === null).sort((a, b) => a.position - b.position).map((group) => renderLibraryGroup(group))}{items.filter((item) => item.group_id === null).sort((a, b) => a.position - b.position).map((item) => renderLibraryItem(item))}{!groups.length && !items.length && <div className={styles.empty}>İlk grubunu veya itemını ekleyerek Kütüphaneyi oluştur.</div>}</div></>}
+          {workspace === 'agenda' ? <><div className={styles.calendarToolbar}><button aria-label={view === 'daily' ? 'Önceki gün' : 'Önceki hafta'} onClick={() => movePeriod(-1)}>‹</button><button className={styles.toolbarDate} onClick={() => { const today = new Date(); setWeekStart(mondayOf(today)); setSelectedDate(isoDate(today)); }}><strong>{view === 'daily' ? new Intl.DateTimeFormat('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' }).format(parseDate(selectedDate)) : <>{new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'short' }).format(weekStart)} – {new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'short' }).format(weekDates[6])}</>}</strong><small>Bugüne dön</small></button><button aria-label={view === 'daily' ? 'Sonraki gün' : 'Sonraki hafta'} onClick={() => movePeriod(1)}>›</button><button className={styles.headerAdd} aria-label="Kütüphaneden aktivite ekle" title="Kütüphaneden aktivite ekle" onClick={() => setWorkspace('library')}>＋</button></div><div className={styles.agendaTimeline}>{visibleDates.map((date) => renderAgendaDay(date))}</div></> : <><div className={styles.libraryToolbar}><div><strong>Aktivite Kütüphanesi</strong><small>Grupları ve itemları sürükleyerek düzenleyebilirsin.</small></div><button onClick={() => setEditor({ groupId: null, initialKind: 'group', initialIsInPlan: false })}>＋ Grup</button><button onClick={() => setEditor({ groupId: null, initialKind: 'daily', initialIsInPlan: false })}>＋ Item</button></div><div className={styles.libraryTree} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { const kind = event.dataTransfer.getData('text/library-kind'); const id = event.dataTransfer.getData('text/library-id'); if (kind === 'item') void moveItem(id, null); else if (kind === 'group') void moveGroup(id, null); }}>{groups.filter((group) => group.parent_id === null).sort((a, b) => a.position - b.position).map((group) => renderLibraryGroup(group))}{items.filter((item) => item.group_id === null).sort((a, b) => a.position - b.position).map((item) => renderLibraryItem(item))}{!groups.length && !items.length && <div className={styles.empty}>İlk grubunu veya itemını ekleyerek Kütüphaneyi oluştur.</div>}</div></>}
         </div>
       </section>}
       {workspace === 'modules' && <section className={styles.surfacePanel}><span>◆</span><h2>Modüller</h2><p>Todo, Alışveriş, Randevular ve Notlar burada bağımsız küçük uygulamalar olarak yer alacak.</p><div className={styles.modulePreview}><button onClick={() => setWorkspace('library')}><b>▦</b><strong>Aktivite Kütüphanesi</strong><small>Aktivitelerini düzenle ve Ajandaya gönder</small></button><button><b>✓</b><strong>Todo</strong><small>Yakında</small></button><button><b>□</b><strong>Alışveriş</strong><small>Yakında</small></button><button><b>◷</b><strong>Randevular</strong><small>Yakında</small></button></div></section>}
@@ -551,9 +578,20 @@ export function PlannerShell({ user }: { user: User }) {
     {durationTarget && <DurationCompletionModal entry={durationTarget} item={items.find((item) => item.id === durationTarget.item_id)!} onClose={() => setDurationTarget(null)} onComplete={async (minutes) => { await completeAssignment(durationTarget, minutes); setDurationTarget(null); }} />}
     {groupPlanTarget && <GroupPlanModal group={groupPlanTarget} itemCount={plannableItemsForGroup(groupPlanTarget.id).length} slots={activeSlots} date={selectedDate} onClose={() => setGroupPlanTarget(null)} onPlan={(slotId) => planGroup(groupPlanTarget, slotId)} />}
     {agendaItemTarget && <AgendaItemModal item={agendaItemTarget} group={groups.find((group) => group.id === agendaItemTarget.group_id)} date={selectedDate} assignments={assignments.filter((entry) => entry.item_id === agendaItemTarget.id && entry.plan_date === selectedDate)} reminders={reminders.filter((reminder) => reminder.item_id === agendaItemTarget.id && reminder.is_enabled)} onClose={() => setAgendaItemTarget(null)} onManageDay={() => { const item = agendaItemTarget; setAgendaItemTarget(null); if (item.kind === 'persistent') setPersistentTarget(item); else if (item.kind === 'daily') setPlanTarget({ item, date: selectedDate }); else setMetricTarget({ item, date: selectedDate, entry: metrics.find((metric) => metric.item_id === item.id && metric.entry_date === selectedDate) }); }} onOpenSource={() => { setAgendaItemTarget(null); setWorkspace('library'); window.history.replaceState(null, '', '/?surface=library'); }} />}
+    {scheduleTarget && <ScheduleModal item={scheduleTarget} slots={activeSlots} selectedDate={selectedDate} onClose={() => setScheduleTarget(null)} onSave={saveSchedule} />}
     {noteEditor && <NoteEditorModal note={noteEditor.note} onClose={() => setNoteEditor(null)} onSave={saveNote} onDelete={noteEditor.note ? () => deleteNote(noteEditor.note!) : undefined} />}
     {editor && <ItemEditorModal key={editor.item?.id ?? editor.group?.id ?? `new-${editor.initialKind ?? 'item'}-${editor.groupId ?? 'root'}`} item={editor.item} group={editor.group} initialKind={editor.initialKind} initialIsInPlan={editor.initialIsInPlan} initialGroupId={editor.groupId} groups={groups} slots={activeSlots} reminders={editor.item ? reminders.filter((reminder) => reminder.item_id === editor.item!.id).map(({ reminder_time, weekdays, is_enabled }) => ({ reminder_time: reminder_time.slice(0, 5), weekdays, is_enabled })) : []} activityTags={Array.from(new Set(items.map((item) => item.activity_tag).filter((tag): tag is string => !!tag))).sort((a, b) => a.localeCompare(b, 'tr'))} onClose={() => setEditor(null)} onSave={saveItem} onSaveGroup={saveGroup} onDelete={editor.item ? async () => { if (await deleteItem(editor.item!)) setEditor(null); } : editor.group ? async () => { if (await deleteGroup(editor.group!)) setEditor(null); } : undefined} />}
   </div>;
+}
+
+function ScheduleModal({ item, slots, selectedDate, onClose, onSave }: { item: ItemRow; slots: SlotRow[]; selectedDate: string; onClose: () => void; onSave: (draft: { time_slot_id: string; recurrence_type: 'once' | 'daily' | 'weekdays'; weekdays: number[]; start_date: string }) => Promise<boolean> }) {
+  const [slotId, setSlotId] = useState(slots[0]?.id ?? '');
+  const [recurrence, setRecurrence] = useState<'once' | 'daily' | 'weekdays'>('daily');
+  const [weekdays, setWeekdays] = useState<number[]>([parseDate(selectedDate).getDay()]);
+  const [busy, setBusy] = useState(false);
+  const dayLabels = ['Pz', 'Pt', 'Sa', 'Ça', 'Pe', 'Cu', 'Ct'];
+  async function submit() { if (!slotId || (recurrence === 'weekdays' && !weekdays.length)) return; setBusy(true); await onSave({ time_slot_id: slotId, recurrence_type: recurrence, weekdays: recurrence === 'weekdays' ? weekdays : [], start_date: selectedDate }); setBusy(false); }
+  return <div className={styles.overlay} onMouseDown={onClose}><section className={`${styles.dialog} ${styles.scheduleDialog}`} role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><div className={styles.dialogTop}><span>Ajandaya ekle</span><button onClick={onClose}>×</button></div><h2>{item.name}</h2><p>Aktivitenin ne zaman Ajandada görüneceğini belirle.</p><label className={styles.scheduleLabel}>Tekrar</label><div className={styles.scheduleRecurrence}><button className={recurrence === 'once' ? styles.chosen : ''} onClick={() => setRecurrence('once')}>Yalnız bu gün</button><button className={recurrence === 'daily' ? styles.chosen : ''} onClick={() => setRecurrence('daily')}>Her gün</button><button className={recurrence === 'weekdays' ? styles.chosen : ''} onClick={() => setRecurrence('weekdays')}>Belirli günler</button></div>{recurrence === 'weekdays' && <div className={styles.scheduleWeekdays}>{dayLabels.map((label, day) => <button key={label} className={weekdays.includes(day) ? styles.chosen : ''} onClick={() => setWeekdays((current) => current.includes(day) ? current.filter((value) => value !== day) : [...current, day].sort())}>{label}</button>)}</div>}<label className={styles.scheduleLabel}>Zaman dilimi</label><div className={styles.slotPicker}>{slots.map((slot) => <button key={slot.id} className={slotId === slot.id ? styles.chosen : ''} onClick={() => setSlotId(slot.id)}><i style={{ background: slot.color ?? palette[0] }} /><span><strong>{slot.name}</strong><small>{shortTime(slot.start_time)}–{shortTime(slot.end_time)}</small></span><b>{slotId === slot.id ? '✓' : ''}</b></button>)}</div>{!slots.length && <div className={styles.empty}>Ajandaya eklemeden önce Ayarlardan bir zaman dilimi oluştur.</div>}<button className={styles.primary} disabled={busy || !slotId || (recurrence === 'weekdays' && !weekdays.length)} onClick={() => void submit()}>{busy ? 'Ekleniyor…' : 'Ajandaya ekle'}</button></section></div>;
 }
 
 function AgendaItemModal({ item, group, date, assignments, reminders, onClose, onManageDay, onOpenSource }: { item: ItemRow; group?: GroupRow; date: string; assignments: AssignmentRow[]; reminders: ReminderRow[]; onClose: () => void; onManageDay: () => void; onOpenSource: () => void }) {

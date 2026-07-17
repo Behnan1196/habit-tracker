@@ -60,7 +60,7 @@ export function ItemEditorModal({ item, group, initialGroupId, initialKind, init
   const [metricPeriod, setMetricPeriod] = useState<'daily' | 'weekly' | 'monthly'>(item?.metric_period ?? 'daily');
   const [activityTag, setActivityTag] = useState(item?.activity_tag ?? '');
   const [estimatedMinutes, setEstimatedMinutes] = useState(item?.estimated_minutes?.toString() ?? '');
-  const [isInPlan, setIsInPlan] = useState(item?.is_in_plan ?? group?.is_in_plan ?? initialIsInPlan);
+  const isInPlan = item?.is_in_plan ?? group?.is_in_plan ?? initialIsInPlan;
   const [contentType, setContentType] = useState<'standard' | 'module'>(group?.content_type ?? 'standard');
   const [defaultItemKind, setDefaultItemKind] = useState<ItemKind | null>(group?.default_item_kind ?? null);
   const [defaultTimeSlotId, setDefaultTimeSlotId] = useState(group?.default_time_slot_id ?? '');
@@ -130,8 +130,6 @@ export function ItemEditorModal({ item, group, initialGroupId, initialKind, init
         </div>
 
         {kind !== 'group' && <div className={styles.reminderSection}><div className={styles.reminderHeading}><div><label className={styles.label}>Hatırlatıcılar</label><small>Uygulama açıkken bildirim gönderir.</small></div><button type="button" onClick={() => setReminderDrafts((current) => [...current, { reminder_time: '09:00', weekdays: [0, 1, 2, 3, 4, 5, 6], is_enabled: true }])}>＋ Saat ekle</button></div>{reminderDrafts.map((reminder, index) => <div className={styles.reminderRow} key={`${index}-${reminder.reminder_time}`}><input type="time" value={reminder.reminder_time} onChange={(event) => setReminderDrafts((current) => current.map((candidate, candidateIndex) => candidateIndex === index ? { ...candidate, reminder_time: event.target.value } : candidate))} /><div>{['Pz', 'Pt', 'Sa', 'Ça', 'Pe', 'Cu', 'Ct'].map((day, dayIndex) => <button type="button" key={day} className={reminder.weekdays.includes(dayIndex) ? styles.reminderDayActive : ''} onClick={() => setReminderDrafts((current) => current.map((candidate, candidateIndex) => candidateIndex === index ? { ...candidate, weekdays: candidate.weekdays.includes(dayIndex) ? candidate.weekdays.filter((value) => value !== dayIndex) : [...candidate.weekdays, dayIndex].sort() } : candidate))}>{day}</button>)}</div><button type="button" aria-label="Hatırlatıcıyı sil" onClick={() => setReminderDrafts((current) => current.filter((_, candidateIndex) => candidateIndex !== index))}>×</button></div>)}</div>}
-        <label className={styles.checkboxLabel}><input type="checkbox" checked={isInPlan} onChange={(event) => setIsInPlan(event.target.checked)} /><span><strong>Planda göster</strong><span className={styles.checkboxHint}>Kapalıysa {kind === 'group' ? 'grup' : 'item'} Kütüphanede kalır; ana Plan ekranında görünmez.</span></span></label>
-
         <label className={styles.label}>Renk</label>
         <div className={styles.colorGrid}>{colors.map((option) => <button key={option} type="button" aria-label={`Renk ${option}`} className={`${styles.colorDot} ${color === option ? styles.selectedColor : ''}`} style={{ background: option }} onClick={() => setColor(option)} />)}</div>
         {kind === 'group' && <><label className={styles.label}>Arka plan</label><div className={styles.colorGrid}>{backgroundColors.map((option) => <button key={option} type="button" aria-label={`Arka plan ${option}`} className={`${styles.colorDot} ${backgroundColor === option ? styles.selectedColor : ''}`} style={{ background: option }} onClick={() => setBackgroundColor(option)} />)}</div></>}
