@@ -180,8 +180,12 @@
 .agendaItemSummary { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }.agendaItemSummary > div { padding: 12px; display: grid; border: 1px solid var(--line); border-radius: 11px; }.agendaItemSummary span { color: var(--muted); font-size: 9px; }.agendaItemSummary strong { margin-top: 4px; font-family: Georgia, serif; font-size: 22px; font-weight: 500; }
 .agendaItemActions { margin-top: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }.agendaItemActions button { padding: 11px 8px; border: 1px solid var(--line); border-radius: 9px; color: var(--accent); background: white; font-size: 10px; cursor: pointer; }.agendaItemActions button:first-child { color: white; border-color: var(--accent); background: var(--accent); }
 .agendaOwnershipNote { margin-top: 13px; display: block; color: var(--muted); font-size: 9px; line-height: 1.45; }
+.agendaViewSwitch { padding: 3px; display: flex; gap: 2px; border: 1px solid var(--line); border-radius: 10px; background: white; }
+.agendaViewSwitch button { padding: 7px 9px; border: 0; border-radius: 7px; color: var(--muted); background: transparent; font-size: 9px; font-weight: 650; cursor: pointer; }
+.agendaViewSwitch .agendaViewActive { color: white; background: var(--accent); }
 @media (max-width: 760px) {
   .main, .mainWide { padding-bottom: 105px; }
   .bottomNav { bottom: max(6px, env(safe-area-inset-bottom)); width: calc(100% - 12px); min-height: 59px; border-radius: 16px; }
   .surfacePanel { min-height: calc(100dvh - 180px); padding: 28px 17px 80px; }
+  .agendaViewSwitch button { padding-inline: 7px; font-size: 8px; }
 }
