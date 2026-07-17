@@ -63,6 +63,12 @@
   .activityBars { width: 100%; }
   .activityRange { width: max-content; }
 }
+/* Touch controls stay compact, but their labels must remain comfortably readable. */
+.bottomNav small { font-size: 10px; }
+.agendaViewSwitch button, .libraryToolbar > button, .libraryRowActions button, .agendaSlotEmpty, .agendaItemActions button, .scheduleRecurrence button, .scheduleWeekdays button, .scheduleList article > div button, .scheduleFormActions > button { font-size: 11px; }
+.libraryGroup > header > div button { font-size: 12px; }
+.agendaDay > header button { font-size: 10px; }
+.modulePreview small, .settingsList small { font-size: 10px; }
 /* Compact planner chrome and in-board date navigation. */
 .stickyTop { margin-bottom: 10px; padding-block: 8px; }
 .stickyTop .header { min-height: 42px; margin-bottom: 0; align-items: center; }

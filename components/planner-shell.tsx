@@ -473,14 +473,18 @@ export function PlannerShell({ user }: { user: User }) {
     if (!scheduleTarget) return false;
     const { id, ...values } = draft;
     const previous = id ? schedules.find((schedule) => schedule.id === id) : undefined;
-    const result = id ? await supabase.from('m_agenda_schedules').update(values).eq('id', id) : await supabase.from('m_agenda_schedules').insert({ ...values, item_id: scheduleTarget.id, user_id: user.id, is_active: true });
-    if (result.error) { setError(result.error.message); return false; }
+    const mutate = () => id ? supabase.from('m_agenda_schedules').update(values).eq('id', id) : supabase.from('m_agenda_schedules').insert({ ...values, item_id: scheduleTarget.id, user_id: user.id, is_active: true });
+    let result = await mutate();
+    if (result.error?.message.toLocaleLowerCase('tr').includes('failed to fetch')) result = await mutate();
+    if (result.error) { setError(result.error.message.includes('Failed to fetch') ? 'Program kaydedilemedi. Bağlantını kontrol edip yeniden dene.' : result.error.message); return false; }
     if (previous) await supabase.from('m_daily_assignments').delete().eq('item_id', previous.item_id).eq('time_slot_id', previous.time_slot_id).gte('plan_date', isoDate(new Date())).eq('status', 'planned');
     await loadData(); return true;
   }
 
   async function toggleSchedule(schedule: ScheduleRow) {
-    const result = await supabase.from('m_agenda_schedules').update({ is_active: !schedule.is_active }).eq('id', schedule.id);
+    const mutate = () => supabase.from('m_agenda_schedules').update({ is_active: !schedule.is_active }).eq('id', schedule.id);
+    let result = await mutate();
+    if (result.error?.message.toLocaleLowerCase('tr').includes('failed to fetch')) result = await mutate();
     if (result.error) setError(result.error.message); else {
       if (schedule.is_active) await supabase.from('m_daily_assignments').delete().eq('item_id', schedule.item_id).eq('time_slot_id', schedule.time_slot_id).gte('plan_date', isoDate(new Date())).eq('status', 'planned');
       await loadData();
@@ -489,7 +493,9 @@ export function PlannerShell({ user }: { user: User }) {
 
   async function deleteSchedule(schedule: ScheduleRow) {
     if (!window.confirm('Bu program Ajandadan kaldırılsın mı? Aktivite Kütüphanede kalacak.')) return;
-    const result = await supabase.from('m_agenda_schedules').delete().eq('id', schedule.id);
+    const mutate = () => supabase.from('m_agenda_schedules').delete().eq('id', schedule.id);
+    let result = await mutate();
+    if (result.error?.message.toLocaleLowerCase('tr').includes('failed to fetch')) result = await mutate();
     if (result.error) setError(result.error.message); else { await supabase.from('m_daily_assignments').delete().eq('item_id', schedule.item_id).eq('time_slot_id', schedule.time_slot_id).gte('plan_date', isoDate(new Date())).eq('status', 'planned'); await loadData(); }
   }
 
