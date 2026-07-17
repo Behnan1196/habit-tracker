@@ -7,6 +7,7 @@ import type { ItemKind, PlanStatus } from '@/types/domain';
 import { ItemEditorModal, type EditableGroup, type EditableItem, type ReminderDraft } from './item-editor-modal';
 import type { CalendarView } from './app-menu';
 import { BottomNav } from './bottom-nav';
+import { TodoModule, type TodoDraft, type TodoListRow, type TodoTaskRow } from './todo-module';
 import styles from './planner-shell.module.css';
 
 type GroupRow = { id: string; parent_id: string | null; name: string; color: string | null; background_color: string | null; position: number; content_type: 'standard' | 'module'; default_item_kind: ItemKind | null; default_time_slot_id: string | null; module_key: string | null; module_settings: Record<string, unknown>; is_in_plan: boolean };
@@ -70,6 +71,9 @@ export function PlannerShell({ user }: { user: User }) {
   const [reminders, setReminders] = useState<ReminderRow[]>([]);
   const [schedules, setSchedules] = useState<ScheduleRow[]>([]);
   const [scheduleTarget, setScheduleTarget] = useState<ItemRow | null>(null);
+  const [todoLists, setTodoLists] = useState<TodoListRow[]>([]);
+  const [todoTasks, setTodoTasks] = useState<TodoTaskRow[]>([]);
+  const [activeModule, setActiveModule] = useState<'todo' | null>(null);
   const [planTarget, setPlanTarget] = useState<{ item: ItemRow; date: string } | null>(null);
   const [persistentTarget, setPersistentTarget] = useState<ItemRow | null>(null);
   const [metricTarget, setMetricTarget] = useState<{ item: ItemRow; date: string; entry?: MetricRow } | null>(null);
@@ -91,7 +95,7 @@ export function PlannerShell({ user }: { user: User }) {
   const weekStartKey = isoDate(weekStart);
 
   const loadData = useCallback(async () => {
-    const [groupResult, itemResult, slotResult, assignmentResult, persistentResult, metricResult, noteResult, reminderResult, scheduleResult] = await Promise.all([
+    const [groupResult, itemResult, slotResult, assignmentResult, persistentResult, metricResult, noteResult, reminderResult, scheduleResult, todoListResult, todoTaskResult] = await Promise.all([
       supabase.from('m_groups').select('id,parent_id,name,color,background_color,position,content_type,default_item_kind,default_time_slot_id,module_key,module_settings,is_in_plan').order('position'),
       supabase.from('m_items').select('id,group_id,kind,name,description,color,metric_unit,metric_period,activity_tag,estimated_minutes,is_in_plan,position').eq('is_active', true).order('position'),
       supabase.from('m_time_slots').select('id,name,start_time,end_time,color,position,is_active').order('position'),
@@ -101,8 +105,10 @@ export function PlannerShell({ user }: { user: User }) {
       supabase.from('m_notes').select('id,group_id,title,body,is_pinned,created_at,updated_at').order('is_pinned', { ascending: false }).order('updated_at', { ascending: false }),
       supabase.from('m_reminders').select('id,item_id,reminder_time,weekdays,is_enabled').order('reminder_time'),
       supabase.from('m_agenda_schedules').select('id,item_id,time_slot_id,recurrence_type,weekdays,start_date,end_date,is_active,reminder_time').order('created_at'),
+      supabase.from('m_todo_lists').select('id,name,color,position').order('position'),
+      supabase.from('m_todo_tasks').select('id,list_id,title,description,status,priority,agenda_date,time_slot_id,reminder_time,position').order('position'),
     ]);
-    const results = [groupResult, itemResult, slotResult, assignmentResult, persistentResult, metricResult, noteResult, reminderResult, scheduleResult];
+    const results = [groupResult, itemResult, slotResult, assignmentResult, persistentResult, metricResult, noteResult, reminderResult, scheduleResult, todoListResult, todoTaskResult];
     const firstError = results.find((result) => result.error)?.error;
     if (firstError) setError(firstError.message);
     else {
@@ -112,6 +118,8 @@ export function PlannerShell({ user }: { user: User }) {
       setNotes((noteResult.data ?? []) as NoteRow[]);
       setReminders((reminderResult.data ?? []) as ReminderRow[]);
       setSchedules((scheduleResult.data ?? []) as ScheduleRow[]);
+      setTodoLists((todoListResult.data ?? []) as TodoListRow[]);
+      setTodoTasks((todoTaskResult.data ?? []) as TodoTaskRow[]);
     }
     setLoading(false);
   }, [supabase, weekEnd, weekStartKey]);
@@ -499,6 +507,29 @@ export function PlannerShell({ user }: { user: User }) {
     if (result.error) setError(result.error.message); else { await supabase.from('m_daily_assignments').delete().eq('item_id', schedule.item_id).eq('time_slot_id', schedule.time_slot_id).gte('plan_date', isoDate(new Date())).eq('status', 'planned'); await loadData(); }
   }
 
+  async function addTodoList(name: string) {
+    const result = await supabase.from('m_todo_lists').insert({ user_id: user.id, name, color: palette[todoLists.length % palette.length], position: todoLists.length });
+    if (result.error) setError(result.error.message); else await loadData();
+  }
+
+  async function saveTodo(draft: TodoDraft, task?: TodoTaskRow) {
+    const result = task ? await supabase.from('m_todo_tasks').update(draft).eq('id', task.id) : await supabase.from('m_todo_tasks').insert({ ...draft, user_id: user.id, position: todoTasks.length, status: 'pending' });
+    if (result.error) { setError(result.error.message); return false; }
+    await loadData(); return true;
+  }
+
+  async function toggleTodo(task: TodoTaskRow) {
+    const done = task.status !== 'done';
+    const result = await supabase.from('m_todo_tasks').update({ status: done ? 'done' : 'pending', completed_at: done ? new Date().toISOString() : null }).eq('id', task.id);
+    if (result.error) setError(result.error.message); else await loadData();
+  }
+
+  async function deleteTodo(task: TodoTaskRow) {
+    if (!window.confirm('Bu görev silinsin mi?')) return;
+    const result = await supabase.from('m_todo_tasks').delete().eq('id', task.id);
+    if (result.error) setError(result.error.message); else await loadData();
+  }
+
   function renderLibraryItem(item: ItemRow, depth = 0) {
     const hasReminder = reminders.some((reminder) => reminder.item_id === item.id && reminder.is_enabled);
     return <div className={styles.libraryRow} key={item.id} draggable onDragStart={(event) => { event.dataTransfer.setData('text/library-kind', 'item'); event.dataTransfer.setData('text/library-id', item.id); }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); if (event.dataTransfer.getData('text/library-kind') === 'item') void moveBefore('item', event.dataTransfer.getData('text/library-id'), item.id); }}>
@@ -560,11 +591,12 @@ export function PlannerShell({ user }: { user: User }) {
     const dayEntries = assignments.filter((entry) => entry.plan_date === key && entry.status !== 'cancelled');
     return <section className={styles.agendaDay} key={key}><header><div><span>{new Intl.DateTimeFormat('tr-TR', { weekday: 'long' }).format(date)}</span><strong>{new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'long' }).format(date)}</strong></div>{view === 'weekly' && <button onClick={() => { setSelectedDate(key); setView('daily'); }}>Günü aç</button>}</header><div className={styles.agendaSlots}>{activeSlots.map((slot) => {
       const slotEntries = dayEntries.filter((entry) => entry.time_slot_id === slot.id);
-      return <section className={styles.agendaSlotSection} key={slot.id}><header><i style={{ background: slot.color ?? palette[0] }} /><div><strong>{slot.name}</strong><small>{shortTime(slot.start_time)}–{shortTime(slot.end_time)}</small></div><span>{slotEntries.length}</span></header><div>{slotEntries.map((entry) => {
+      const todoEntries = todoTasks.filter((task) => task.agenda_date === key && task.time_slot_id === slot.id);
+      return <section className={styles.agendaSlotSection} key={slot.id}><header><i style={{ background: slot.color ?? palette[0] }} /><div><strong>{slot.name}</strong><small>{shortTime(slot.start_time)}–{shortTime(slot.end_time)}</small></div><span>{slotEntries.length + todoEntries.length}</span></header><div>{slotEntries.map((entry) => {
         const item = items.find((candidate) => candidate.id === entry.item_id);
         if (!item) return null;
         return <article className={entry.status === 'done' ? styles.agendaEntryDone : ''} key={entry.id}><button className={styles.agendaEntryState} onClick={() => { setSelectedDate(key); if (entry.status === 'done') void restoreAssignment({ ...entry, source: 'daily' }); else if (item.activity_tag || item.estimated_minutes) setDurationTarget({ ...entry, source: 'daily' }); else void completeAssignment({ ...entry, source: 'daily' }); }}><span>{entry.status === 'done' ? '✓' : ''}</span></button><button className={styles.agendaEntryIdentity} onClick={() => { setSelectedDate(key); setAgendaItemTarget(item); }}><strong>{item.name}</strong><small>{groups.find((group) => group.id === item.group_id)?.name ?? item.activity_tag ?? 'Aktivite'}{item.estimated_minutes ? ` · ${item.estimated_minutes} dk` : ''}</small></button><button className={styles.agendaEntryRemove} aria-label="Bu günden kaldır" onClick={() => void cancelAssignment({ ...entry, source: 'daily' })}>×</button></article>;
-      })}{!slotEntries.length && <button className={styles.agendaSlotEmpty} onClick={() => { setSelectedDate(key); setWorkspace('library'); }}>Kütüphaneden aktivite ekle</button>}</div></section>;
+      })}{todoEntries.map((task) => <article className={`${styles.agendaTodoEntry} ${task.status === 'done' ? styles.agendaEntryDone : ''}`} key={`todo-${task.id}`}><button className={styles.agendaEntryState} onClick={() => void toggleTodo(task)}><span>{task.status === 'done' ? '✓' : ''}</span></button><button className={styles.agendaEntryIdentity} onClick={() => { setWorkspace('modules'); setActiveModule('todo'); }}><strong>{task.title}</strong><small>Todo · {todoLists.find((list) => list.id === task.list_id)?.name ?? 'Gelen Kutusu'}{task.priority === 'high' ? ' · Yüksek' : ''}</small></button><button className={styles.agendaEntryRemove} aria-label="Ajandadan kaldır" onClick={() => void saveTodo({ title: task.title, description: task.description, list_id: task.list_id, priority: task.priority, agenda_date: null, time_slot_id: null, reminder_time: null }, task)}>×</button></article>)}{!slotEntries.length && !todoEntries.length && <button className={styles.agendaSlotEmpty} onClick={() => { setSelectedDate(key); setWorkspace('library'); }}>Kütüphaneden aktivite ekle</button>}</div></section>;
     })}</div></section>;
   }
 
@@ -590,7 +622,7 @@ export function PlannerShell({ user }: { user: User }) {
           {workspace === 'agenda' ? <><div className={styles.calendarToolbar}><button aria-label={view === 'daily' ? 'Önceki gün' : 'Önceki hafta'} onClick={() => movePeriod(-1)}>‹</button><button className={styles.toolbarDate} onClick={() => { const today = new Date(); setWeekStart(mondayOf(today)); setSelectedDate(isoDate(today)); }}><strong>{view === 'daily' ? new Intl.DateTimeFormat('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' }).format(parseDate(selectedDate)) : <>{new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'short' }).format(weekStart)} – {new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'short' }).format(weekDates[6])}</>}</strong><small>Bugüne dön</small></button><button aria-label={view === 'daily' ? 'Sonraki gün' : 'Sonraki hafta'} onClick={() => movePeriod(1)}>›</button><button className={styles.headerAdd} aria-label="Kütüphaneden aktivite ekle" title="Kütüphaneden aktivite ekle" onClick={() => setWorkspace('library')}>＋</button></div><div className={styles.agendaTimeline}>{visibleDates.map((date) => renderAgendaDay(date))}</div></> : <><div className={styles.libraryToolbar}><div><strong>Aktivite Kütüphanesi</strong><small>Grupları ve itemları sürükleyerek düzenleyebilirsin.</small></div><button onClick={() => setEditor({ groupId: null, initialKind: 'group', initialIsInPlan: false })}>＋ Grup</button><button onClick={() => setEditor({ groupId: null, initialKind: 'daily', initialIsInPlan: false })}>＋ Item</button></div><div className={styles.libraryTree} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { const kind = event.dataTransfer.getData('text/library-kind'); const id = event.dataTransfer.getData('text/library-id'); if (kind === 'item') void moveItem(id, null); else if (kind === 'group') void moveGroup(id, null); }}>{groups.filter((group) => group.parent_id === null).sort((a, b) => a.position - b.position).map((group) => renderLibraryGroup(group))}{items.filter((item) => item.group_id === null).sort((a, b) => a.position - b.position).map((item) => renderLibraryItem(item))}{!groups.length && !items.length && <div className={styles.empty}>İlk grubunu veya itemını ekleyerek Kütüphaneyi oluştur.</div>}</div></>}
         </div>
       </section>}
-      {workspace === 'modules' && <section className={styles.surfacePanel}><span>◆</span><h2>Modüller</h2><p>Todo, Alışveriş, Randevular ve Notlar burada bağımsız küçük uygulamalar olarak yer alacak.</p><div className={styles.modulePreview}><button onClick={() => setWorkspace('library')}><b>▦</b><strong>Aktivite Kütüphanesi</strong><small>Aktivitelerini düzenle ve Ajandaya gönder</small></button><button><b>✓</b><strong>Todo</strong><small>Yakında</small></button><button><b>□</b><strong>Alışveriş</strong><small>Yakında</small></button><button><b>◷</b><strong>Randevular</strong><small>Yakında</small></button></div></section>}
+      {workspace === 'modules' && (activeModule === 'todo' ? <><button className={styles.moduleBack} onClick={() => setActiveModule(null)}>‹ Modüller</button><TodoModule lists={todoLists} tasks={todoTasks} slots={activeSlots} onAddList={addTodoList} onSave={saveTodo} onToggle={toggleTodo} onDelete={deleteTodo} /></> : <section className={styles.surfacePanel}><span>◆</span><h2>Modüller</h2><p>Bağımsız araçlar gerektiğinde Ajandaya kendi kayıtlarını gönderir.</p><div className={styles.modulePreview}><button onClick={() => setWorkspace('library')}><b>▦</b><strong>Aktivite Kütüphanesi</strong><small>Aktivitelerini düzenle ve Ajandaya gönder</small></button><button onClick={() => setActiveModule('todo')}><b>✓</b><strong>Todo</strong><small>{todoTasks.filter((task) => task.status === 'pending').length} açık görev</small></button><button><b>□</b><strong>Alışveriş</strong><small>Yakında</small></button><button><b>◷</b><strong>Randevular</strong><small>Yakında</small></button></div></section>)}
       {workspace === 'settings' && <section className={styles.surfacePanel}><span>⚙</span><h2>Ayarlar</h2><p>Günün yapısını, bildirimleri ve ileride bağlantılı servisleri buradan yöneteceksin.</p><div className={styles.settingsList}><button onClick={() => setSlotManagerOpen(true)}><span>◷</span><strong>Zaman dilimleri</strong><small>Saatleri ve günün bölümlerini düzenle</small><b>›</b></button><button onClick={() => void enableNotifications()}><span>◉</span><strong>Bildirimler</strong><small>{notificationPermission === 'granted' ? 'Bildirimler açık' : 'Bildirim iznini yönet'}</small><b>›</b></button><button onClick={() => void supabase.auth.signOut()}><span>↗</span><strong>Çıkış yap</strong><small>{user.email}</small><b>›</b></button></div></section>}
     </main>
     <BottomNav active={workspace} onChange={(surface) => { setWorkspace(surface); window.history.replaceState(null, '', surface === 'agenda' ? '/' : `/?surface=${surface}`); }} />
