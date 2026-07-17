@@ -30,9 +30,10 @@ function localParts(timeZone: string) {
 
 Deno.serve(async () => {
   const { data: reminders, error } = await supabase
-    .from('m_reminders')
-    .select('id,user_id,item_id,reminder_time,weekdays,m_items(name,description)')
-    .eq('is_enabled', true);
+    .from('m_agenda_schedules')
+    .select('id,user_id,item_id,reminder_time,recurrence_type,weekdays,start_date,end_date,is_active,m_items(name,description)')
+    .eq('is_active', true)
+    .not('reminder_time', 'is', null);
   if (error) return new Response(error.message, { status: 500 });
   const userIds = [...new Set((reminders ?? []).map((reminder) => reminder.user_id))];
   const { data: profiles } = await supabase.from('m_profiles').select('id,timezone').in('id', userIds);
@@ -42,12 +43,15 @@ Deno.serve(async () => {
   for (const reminder of reminders ?? []) {
     const item = Array.isArray(reminder.m_items) ? reminder.m_items[0] : reminder.m_items;
     const local = localParts(timeZones.get(reminder.user_id) || 'Europe/Istanbul');
-    if (!reminder.weekdays.includes(local.weekday) || reminder.reminder_time.slice(0, 5) !== local.time) continue;
+    if (reminder.reminder_time.slice(0, 5) !== local.time) continue;
+    if (local.date < reminder.start_date || (reminder.end_date && local.date > reminder.end_date)) continue;
+    if (reminder.recurrence_type === 'once' && local.date !== reminder.start_date) continue;
+    if (reminder.recurrence_type === 'weekdays' && !reminder.weekdays.includes(local.weekday)) continue;
 
     const { data: subscriptions } = await supabase.from('m_push_subscriptions').select('*').eq('user_id', reminder.user_id);
     for (const subscription of subscriptions ?? []) {
-      const delivery = { reminder_id: reminder.id, subscription_id: subscription.id, local_date: local.date, local_time: `${local.time}:00` };
-      const { error: deliveryError } = await supabase.from('m_reminder_deliveries').insert(delivery);
+      const delivery = { schedule_id: reminder.id, subscription_id: subscription.id, local_date: local.date, local_time: `${local.time}:00` };
+      const { error: deliveryError } = await supabase.from('m_schedule_deliveries').insert(delivery);
       if (deliveryError?.code === '23505') continue;
       if (deliveryError) continue;
       try {
@@ -66,7 +70,7 @@ Deno.serve(async () => {
         if (statusCode === 404 || statusCode === 410) {
           await supabase.from('m_push_subscriptions').delete().eq('id', subscription.id);
         } else {
-          await supabase.from('m_reminder_deliveries').delete().match(delivery);
+          await supabase.from('m_schedule_deliveries').delete().match(delivery);
         }
       }
     }

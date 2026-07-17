@@ -64,7 +64,7 @@ export function ItemEditorModal({ item, group, initialGroupId, initialKind, init
   const [contentType, setContentType] = useState<'standard' | 'module'>(group?.content_type ?? 'standard');
   const [defaultItemKind, setDefaultItemKind] = useState<ItemKind | null>(group?.default_item_kind ?? null);
   const [defaultTimeSlotId, setDefaultTimeSlotId] = useState(group?.default_time_slot_id ?? '');
-  const [reminderDrafts, setReminderDrafts] = useState<ReminderDraft[]>(reminders);
+  const [reminderDrafts] = useState<ReminderDraft[]>(reminders);
   const [busy, setBusy] = useState(false);
 
   function inheritedKind(targetGroupId: string | null): ItemKind {
@@ -129,7 +129,6 @@ export function ItemEditorModal({ item, group, initialGroupId, initialKind, init
           {kind === 'daily' && <div><label className={styles.label} htmlFor="estimated-minutes">Tahmini süre</label><div className={styles.unitInput}><input id="estimated-minutes" className={styles.input} type="number" min="5" step="5" value={estimatedMinutes} onChange={(event) => setEstimatedMinutes(event.target.value)} placeholder="45" /><span>dk</span></div></div>}
         </div>
 
-        {kind !== 'group' && <div className={styles.reminderSection}><div className={styles.reminderHeading}><div><label className={styles.label}>Hatırlatıcılar</label><small>Uygulama açıkken bildirim gönderir.</small></div><button type="button" onClick={() => setReminderDrafts((current) => [...current, { reminder_time: '09:00', weekdays: [0, 1, 2, 3, 4, 5, 6], is_enabled: true }])}>＋ Saat ekle</button></div>{reminderDrafts.map((reminder, index) => <div className={styles.reminderRow} key={`${index}-${reminder.reminder_time}`}><input type="time" value={reminder.reminder_time} onChange={(event) => setReminderDrafts((current) => current.map((candidate, candidateIndex) => candidateIndex === index ? { ...candidate, reminder_time: event.target.value } : candidate))} /><div>{['Pz', 'Pt', 'Sa', 'Ça', 'Pe', 'Cu', 'Ct'].map((day, dayIndex) => <button type="button" key={day} className={reminder.weekdays.includes(dayIndex) ? styles.reminderDayActive : ''} onClick={() => setReminderDrafts((current) => current.map((candidate, candidateIndex) => candidateIndex === index ? { ...candidate, weekdays: candidate.weekdays.includes(dayIndex) ? candidate.weekdays.filter((value) => value !== dayIndex) : [...candidate.weekdays, dayIndex].sort() } : candidate))}>{day}</button>)}</div><button type="button" aria-label="Hatırlatıcıyı sil" onClick={() => setReminderDrafts((current) => current.filter((_, candidateIndex) => candidateIndex !== index))}>×</button></div>)}</div>}
         <label className={styles.label}>Renk</label>
         <div className={styles.colorGrid}>{colors.map((option) => <button key={option} type="button" aria-label={`Renk ${option}`} className={`${styles.colorDot} ${color === option ? styles.selectedColor : ''}`} style={{ background: option }} onClick={() => setColor(option)} />)}</div>
         {kind === 'group' && <><label className={styles.label}>Arka plan</label><div className={styles.colorGrid}>{backgroundColors.map((option) => <button key={option} type="button" aria-label={`Arka plan ${option}`} className={`${styles.colorDot} ${backgroundColor === option ? styles.selectedColor : ''}`} style={{ background: option }} onClick={() => setBackgroundColor(option)} />)}</div></>}
