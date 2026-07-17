@@ -494,6 +494,10 @@ export function PlannerShell({ user }: { user: User }) {
     let result = await mutate();
     if (result.error?.message.toLocaleLowerCase('tr').includes('failed to fetch')) result = await mutate();
     if (result.error) { setError(result.error.message.includes('Failed to fetch') ? 'Program kaydedilemedi. Bağlantını kontrol edip yeniden dene.' : result.error.message); return false; }
+    if (!id) {
+      const clearedExceptions = await supabase.from('m_daily_assignments').delete().eq('item_id', scheduleTarget.id).eq('time_slot_id', values.time_slot_id).gte('plan_date', values.start_date).eq('status', 'cancelled');
+      if (clearedExceptions.error) { setError(clearedExceptions.error.message); return false; }
+    }
     if (previous) await supabase.from('m_daily_assignments').delete().eq('item_id', previous.item_id).eq('time_slot_id', previous.time_slot_id).gte('plan_date', isoDate(new Date())).eq('status', 'planned');
     await loadData(); return true;
   }
