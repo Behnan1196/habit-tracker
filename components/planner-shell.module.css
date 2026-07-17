@@ -136,13 +136,13 @@
 .calendarRow { min-height: 58px; }
 .libraryDialog { width: min(620px, 100%); }.libraryHeading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }.libraryHeading h2 { margin-bottom: 12px; }.libraryHeading > div { display: flex; gap: 6px; }.libraryHeading button { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--accent); background: white; font-size: 10px; cursor: pointer; }.librarySearch { width: 100%; box-sizing: border-box; margin: 0 0 16px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 9px; outline: none; }.libraryList { display: grid; gap: 7px; }.libraryList article { padding: 9px; display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 10px; }.libraryIdentity { min-width: 0; flex: 1; display: flex; align-items: center; gap: 9px; border: 0; background: transparent; text-align: left; cursor: pointer; }.libraryIdentity i { width: 4px; height: 38px; flex: 0 0 auto; border-radius: 4px; }.libraryIdentity span { min-width: 0; display: grid; }.libraryIdentity strong { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }.libraryIdentity small { margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.25; }.libraryList article > div { display: flex; gap: 5px; }.libraryList article > div button { padding: 7px 8px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: white; font-size: 9px; cursor: pointer; }.libraryList article > div .inPlan { color: white; border-color: var(--accent); background: var(--accent); }
 @media (max-width: 520px) { .agendaButton { width: 38px; height: 38px; padding: 0; font-size: 0; }.agendaButton span { margin: 0; font-size: 15px; }.libraryList article { align-items: stretch; }.libraryList article > div { flex-direction: column; justify-content: center; } }
-.libraryBoard { background: #fbfcfa; }
-.libraryToolbar { min-height: 58px; padding: 9px 10px 9px 14px; display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--line); background: #fafbf8; }
+.libraryBoard { border-color: #d8d4c9; background: #f8f5ed; box-shadow: 0 12px 45px #6f5f330d, inset 0 3px 0 #b18a4f; }
+.libraryToolbar { min-height: 58px; padding: 9px 10px 9px 14px; display: flex; align-items: center; gap: 6px; border-bottom: 1px solid #ded8c9; background: #f3eee2; }
 .libraryToolbar > div { min-width: 0; flex: 1; display: grid; }
 .libraryToolbar strong { font-family: Georgia, serif; font-size: 16px; font-weight: 500; }
 .libraryToolbar small { margin-top: 2px; color: var(--muted); font-size: 9px; }
 .libraryToolbar > button { padding: 8px 9px; border: 1px solid var(--line); border-radius: 8px; color: var(--accent); background: white; font-size: 9px; cursor: pointer; }
-.libraryTree { min-height: 160px; }
+.libraryTree { min-height: 160px; background: #fcfaf5; }
 .libraryGroup > header { min-width: 0; min-height: 38px; display: flex; align-items: center; gap: 6px; border-bottom: 1px solid #00000012; }
 .libraryGroup > header > i { width: 7px; height: 7px; flex: 0 0 auto; border: 1px solid #00000025; border-radius: 50%; }
 .libraryGroup > header > small { color: inherit; font-size: 9px; opacity: .65; }
@@ -159,6 +159,7 @@
 .libraryRowActions { padding-right: 7px; display: flex; align-items: center; gap: 5px; }
 .libraryRowActions button { padding: 7px 8px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: white; font-size: 9px; cursor: pointer; }
 .libraryRowActions .libraryInPlan { color: white; border-color: var(--accent); background: var(--accent); }
+.libraryOrder { display: grid; gap: 1px; }.libraryOrder button { width: 24px; height: 20px; padding: 0; border-color: transparent; background: transparent; font-size: 11px; }.libraryOrder button:disabled { opacity: .2; cursor: default; }
 @media (max-width: 520px) {
   .libraryToolbar small { display: none; }
   .libraryToolbar > button { padding-inline: 7px; }
