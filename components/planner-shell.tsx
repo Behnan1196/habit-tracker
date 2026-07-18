@@ -79,6 +79,7 @@ export function PlannerShell({ user }: { user: User }) {
   const [preferredBlockId, setPreferredBlockId] = useState<string | null>(null);
   const [agendaAddTarget, setAgendaAddTarget] = useState<{ slot: SlotRow; date: string } | null>(null);
   const [collapsedBlocks, setCollapsedBlocks] = useState<Set<string>>(() => new Set());
+  const collapsedBlocksLoaded = useRef(false);
   const [todoLists, setTodoLists] = useState<TodoListRow[]>([]);
   const [todoTasks, setTodoTasks] = useState<TodoTaskRow[]>([]);
   const [activeModule, setActiveModule] = useState<'todo' | 'metrics' | null>(null);
@@ -168,6 +169,15 @@ export function PlannerShell({ user }: { user: User }) {
     if ('Notification' in window) queueMicrotask(() => setNotificationPermission(Notification.permission));
     if ('serviceWorker' in navigator) void navigator.serviceWorker.register('/sw.js');
   }, []);
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem(`momentum-collapsed-blocks:${user.id}`);
+    queueMicrotask(() => { if (stored) { try { setCollapsedBlocks(new Set(JSON.parse(stored) as string[])); } catch { /* Ignore invalid legacy state. */ } } collapsedBlocksLoaded.current = true; });
+  }, [user.id]);
+
+  useEffect(() => {
+    if (collapsedBlocksLoaded.current) window.localStorage.setItem(`momentum-collapsed-blocks:${user.id}`, JSON.stringify([...collapsedBlocks]));
+  }, [collapsedBlocks, user.id]);
 
   async function enableNotifications() {
     if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) { setNotificationPermission('unsupported'); return; }
@@ -525,6 +535,12 @@ export function PlannerShell({ user }: { user: User }) {
     if (result.error) setError(result.error.message); else { setAgendaAddTarget(null); await loadData(); }
   }
 
+  function closeScheduleTarget() {
+    const returnToAgenda = preferredSlotId !== null;
+    setScheduleTarget(null); setPreferredSlotId(null); setPreferredBlockId(null);
+    if (returnToAgenda) { setWorkspace('agenda'); window.history.replaceState(null, '', '/'); }
+  }
+
   async function toggleSchedule(schedule: ScheduleRow) {
     const mutate = () => supabase.from('m_agenda_schedules').update({ is_active: !schedule.is_active }).eq('id', schedule.id);
     let result = await mutate();
@@ -573,7 +589,7 @@ export function PlannerShell({ user }: { user: User }) {
 
   async function saveAgendaOrder(rows: AgendaOrderRow[]) {
     const results = await Promise.all(rows.map((row, agenda_position) => row.kind === 'activity' && row.schedule
-      ? supabase.from('m_agenda_schedules').update({ agenda_position }).eq('id', row.schedule.id)
+      ? supabase.from('m_agenda_schedules').update({ agenda_position, block_id: row.blockId }).eq('id', row.schedule.id)
       : row.task ? supabase.from('m_todo_tasks').update({ agenda_position }).eq('id', row.task.id) : Promise.resolve({ error: null })));
     const failed = results.find((result) => result.error)?.error;
     if (failed) setError(failed.message); else await loadData();
@@ -587,10 +603,33 @@ export function PlannerShell({ user }: { user: User }) {
       setError('Kesin saatli kayıtlar yalnız aynı saat içindeki kayıtlarla sıralanabilir.');
       return;
     }
-    const ordered = [...rows];
-    const [moving] = ordered.splice(from, 1);
-    ordered.splice(to, 0, moving);
-    void saveAgendaOrder(ordered);
+    const targetBlockId = rows[to].blockId;
+    const moving = { ...rows[from], blockId: targetBlockId };
+    if (moving.kind === 'todo' && targetBlockId) { setError('Todo kayıtlarını bloklara taşıma desteği sonraki modül bağlantısında eklenecek.'); return; }
+    const sourceRows = rows.filter((row) => row.key !== movingKey && row.blockId === rows[from].blockId);
+    const destinationRows = rows.filter((row) => row.key !== movingKey && row.blockId === targetBlockId);
+    const targetIndex = destinationRows.findIndex((row) => row.key === targetKey);
+    destinationRows.splice(targetIndex < 0 ? destinationRows.length : targetIndex, 0, moving);
+    void saveAgendaOrder([...sourceRows, ...destinationRows]);
+  }
+
+  function moveAgendaToBlock(rows: AgendaOrderRow[], movingKey: string, blockId: string | null) {
+    const moving = rows.find((row) => row.key === movingKey);
+    if (!moving || moving.blockId === blockId) return;
+    if (moving.kind === 'todo' && blockId) { setError('Todo kayıtlarını bloklara taşıma desteği sonraki modül bağlantısında eklenecek.'); return; }
+    const sourceRows = rows.filter((row) => row.key !== movingKey && row.blockId === moving.blockId);
+    const destinationRows = rows.filter((row) => row.blockId === blockId);
+    void saveAgendaOrder([...sourceRows, ...destinationRows, { ...moving, blockId }]);
+  }
+
+  async function moveAgendaBlock(blocks: AgendaBlockRow[], movingId: string, targetId: string) {
+    if (!movingId || movingId === targetId) return;
+    const from = blocks.findIndex((block) => block.id === movingId); const to = blocks.findIndex((block) => block.id === targetId);
+    if (from < 0 || to < 0) return;
+    const ordered = [...blocks]; const [moving] = ordered.splice(from, 1); ordered.splice(to, 0, moving);
+    const results = await Promise.all(ordered.map((block, position) => supabase.from('m_agenda_blocks').update({ position }).eq('id', block.id)));
+    const failed = results.find((result) => result.error)?.error;
+    if (failed) setError(failed.message); else await loadData();
   }
 
   function renderLibraryItem(item: ItemRow, depth = 0) {
@@ -661,6 +700,7 @@ export function PlannerShell({ user }: { user: User }) {
         return timeA.localeCompare(timeB) || a.position - b.position;
       });
       const renderRow = (row: AgendaOrderRow, scopedRows: AgendaOrderRow[]) => {
+        scopedRows = orderRows;
         const activity = row.kind === 'activity' ? activityRows.find((candidate) => `activity-${candidate.entry.id}` === row.key) : undefined;
         const task = row.task;
         if (activity) return <article draggable className={activity.entry.status === 'done' ? styles.agendaEntryDone : ''} key={row.key} onDragStart={(event) => event.dataTransfer.setData('text/agenda-row', row.key)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); dropAgendaRow(scopedRows, event.dataTransfer.getData('text/agenda-row'), row.key); }}><button className={styles.agendaEntryState} onClick={() => { setSelectedDate(key); if (activity.entry.status === 'done') void restoreAssignment({ ...activity.entry, source: 'daily' }); else if (activity.item.activity_tag || activity.item.estimated_minutes) setDurationTarget({ ...activity.entry, source: 'daily' }); else void completeAssignment({ ...activity.entry, source: 'daily' }); }}><span>{activity.entry.status === 'done' ? '✓' : ''}</span></button><button className={styles.agendaEntryIdentity} onClick={() => { setSelectedDate(key); setAgendaItemTarget(activity.item); }}><strong>{activity.item.name}</strong><small>{row.scheduledTime ? `${row.scheduledTime.slice(0, 5)} · ` : ''}{groups.find((group) => group.id === activity.item.group_id)?.name ?? activity.item.activity_tag ?? 'Aktivite'}{activity.item.estimated_minutes ? ` · ${activity.item.estimated_minutes} dk` : ''}{activity.schedule?.reminder_time || reminders.some((reminder) => reminder.item_id === activity.item.id && reminder.is_enabled) ? ' · 🔔' : ''}</small></button><button className={styles.agendaEntryRemove} aria-label="Yalnız bu günden kaldır" title="Yalnız bu günden kaldır" onClick={() => void cancelAssignment({ ...activity.entry, source: 'daily' })}>×</button></article>;
@@ -669,7 +709,13 @@ export function PlannerShell({ user }: { user: User }) {
       };
       const slotBlocks = agendaBlocks.filter((block) => block.time_slot_id === slot.id).sort((a, b) => a.position - b.position);
       const ungroupedRows = orderRows.filter((row) => !row.blockId);
-      return <section className={styles.agendaSlotSection} key={slot.id}><header><i style={{ background: slot.color ?? palette[0] }} /><div><strong>{slot.name}</strong><small>{shortTime(slot.start_time)}–{shortTime(slot.end_time)}</small></div><button className={styles.agendaSlotAdd} aria-label={`${slot.name} zaman dilimine ekle`} onClick={() => setAgendaAddTarget({ slot, date: key })}>＋</button></header><div>{ungroupedRows.map((row) => renderRow(row, ungroupedRows))}{slotBlocks.map((block) => { const blockRows = orderRows.filter((row) => row.blockId === block.id); const collapsed = collapsedBlocks.has(block.id); return <section className={styles.agendaBlock} key={block.id}><header><button onClick={() => setCollapsedBlocks((current) => { const next = new Set(current); if (next.has(block.id)) next.delete(block.id); else next.add(block.id); return next; })}><span>{collapsed ? '›' : '⌄'}</span><strong>{block.name}</strong><small>{blockRows.length}</small></button><button aria-label={`${block.name} bloğuna aktivite ekle`} onClick={() => { setPreferredSlotId(slot.id); setPreferredBlockId(block.id); setSelectedDate(key); setWorkspace('library'); }}>＋</button></header>{!collapsed && blockRows.map((row) => renderRow(row, blockRows))}</section>; })}{!orderRows.length && !slotBlocks.length && <button className={styles.agendaSlotEmpty} onClick={() => setAgendaAddTarget({ slot, date: key })}>Bu zaman dilimine ekle</button>}</div></section>;
+      return <section className={styles.agendaSlotSection} key={slot.id}>
+        <header onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); moveAgendaToBlock(orderRows, event.dataTransfer.getData('text/agenda-row'), null); }}><i style={{ background: slot.color ?? palette[0] }} /><div><strong>{slot.name}</strong><small>{shortTime(slot.start_time)}–{shortTime(slot.end_time)}</small></div><button className={styles.agendaSlotAdd} aria-label={`${slot.name} zaman dilimine ekle`} onClick={() => setAgendaAddTarget({ slot, date: key })}>＋</button></header>
+        <div>{ungroupedRows.map((row) => renderRow(row, ungroupedRows))}{slotBlocks.map((block) => {
+          const blockRows = orderRows.filter((row) => row.blockId === block.id); const collapsed = collapsedBlocks.has(block.id);
+          return <section className={styles.agendaBlock} key={block.id}><header draggable onDragStart={(event) => event.dataTransfer.setData('text/agenda-block', block.id)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); const movingBlock = event.dataTransfer.getData('text/agenda-block'); if (movingBlock) void moveAgendaBlock(slotBlocks, movingBlock, block.id); else moveAgendaToBlock(orderRows, event.dataTransfer.getData('text/agenda-row'), block.id); }}><button onClick={() => setCollapsedBlocks((current) => { const next = new Set(current); if (next.has(block.id)) next.delete(block.id); else next.add(block.id); return next; })}><span>{collapsed ? '›' : '⌄'}</span><strong>{block.name}</strong><small>{blockRows.length}</small></button><button aria-label={`${block.name} bloğuna aktivite ekle`} onClick={() => { setPreferredSlotId(slot.id); setPreferredBlockId(block.id); setSelectedDate(key); setWorkspace('library'); }}>＋</button></header>{!collapsed && blockRows.map((row) => renderRow(row, blockRows))}</section>;
+        })}{!orderRows.length && !slotBlocks.length && <button className={styles.agendaSlotEmpty} onClick={() => setAgendaAddTarget({ slot, date: key })}>Bu zaman dilimine ekle</button>}</div>
+      </section>;
     })}</div></section>;
   }
 
@@ -708,7 +754,7 @@ export function PlannerShell({ user }: { user: User }) {
     {durationTarget && <DurationCompletionModal entry={durationTarget} item={items.find((item) => item.id === durationTarget.item_id)!} onClose={() => setDurationTarget(null)} onComplete={async (minutes) => { await completeAssignment(durationTarget, minutes); setDurationTarget(null); }} />}
     {groupPlanTarget && <GroupPlanModal group={groupPlanTarget} itemCount={plannableItemsForGroup(groupPlanTarget.id).length} slots={activeSlots} date={selectedDate} onClose={() => setGroupPlanTarget(null)} onPlan={(slotId) => planGroup(groupPlanTarget, slotId)} />}
     {agendaItemTarget && <AgendaItemModal item={agendaItemTarget} group={groups.find((group) => group.id === agendaItemTarget.group_id)} date={selectedDate} assignments={assignments.filter((entry) => entry.item_id === agendaItemTarget.id && entry.plan_date === selectedDate)} reminders={reminders.filter((reminder) => reminder.item_id === agendaItemTarget.id && reminder.is_enabled)} onClose={() => setAgendaItemTarget(null)} onManageDay={() => { const item = agendaItemTarget; setAgendaItemTarget(null); if (item.kind === 'persistent') setPersistentTarget(item); else if (item.kind === 'daily') setPlanTarget({ item, date: selectedDate }); else setMetricTarget({ item, date: selectedDate, entry: metrics.find((metric) => metric.item_id === item.id && metric.entry_date === selectedDate) }); }} onManageProgram={() => { const item = agendaItemTarget; setAgendaItemTarget(null); setScheduleTarget(item); }} onOpenSource={() => { setAgendaItemTarget(null); setWorkspace('library'); window.history.replaceState(null, '', '/?surface=library'); }} />}
-    {scheduleTarget && <ScheduleManagerModal item={scheduleTarget} schedules={schedules.filter((schedule) => schedule.item_id === scheduleTarget.id)} slots={activeSlots} blocks={agendaBlocks} preferredSlotId={preferredSlotId} selectedDate={selectedDate} onClose={() => { setScheduleTarget(null); setPreferredSlotId(null); setPreferredBlockId(null); }} onSave={saveSchedule} onToggle={toggleSchedule} onDelete={deleteSchedule} />}
+    {scheduleTarget && <ScheduleManagerModal item={scheduleTarget} schedules={schedules.filter((schedule) => schedule.item_id === scheduleTarget.id)} slots={activeSlots} blocks={agendaBlocks} preferredSlotId={preferredSlotId} selectedDate={selectedDate} onClose={closeScheduleTarget} onSave={saveSchedule} onToggle={toggleSchedule} onDelete={deleteSchedule} />}
     {agendaAddTarget && <div className={styles.overlay} onMouseDown={() => setAgendaAddTarget(null)}><section className={`${styles.dialog} ${styles.agendaAddDialog}`} role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><div className={styles.dialogTop}><span>{agendaAddTarget.slot.name}</span><button onClick={() => setAgendaAddTarget(null)}>×</button></div><h2>Ajandaya ekle</h2><p>Bu zaman dilimine ne eklemek istiyorsun?</p><div className={styles.agendaAddOptions}><button onClick={() => { setPreferredSlotId(agendaAddTarget.slot.id); setSelectedDate(agendaAddTarget.date); setAgendaAddTarget(null); setWorkspace('library'); }}><b>▦</b><span><strong>Kütüphaneden aktivite</strong><small>Zaman dilimi otomatik seçilecek</small></span></button><button onClick={() => void createAgendaBlock(agendaAddTarget.slot)}><b>▤</b><span><strong>Blok oluştur</strong><small>İlaçlar veya Sabah rutini gibi</small></span></button></div></section></div>}
     {noteEditor && <NoteEditorModal note={noteEditor.note} onClose={() => setNoteEditor(null)} onSave={saveNote} onDelete={noteEditor.note ? () => deleteNote(noteEditor.note!) : undefined} />}
     {editor && <ItemEditorModal key={editor.item?.id ?? editor.group?.id ?? `new-${editor.initialKind ?? 'item'}-${editor.groupId ?? 'root'}`} item={editor.item} group={editor.group} initialKind={editor.initialKind} initialIsInPlan={editor.initialIsInPlan} initialGroupId={editor.groupId} groups={groups} slots={activeSlots} reminders={editor.item ? reminders.filter((reminder) => reminder.item_id === editor.item!.id).map(({ reminder_time, weekdays, is_enabled }) => ({ reminder_time: reminder_time.slice(0, 5), weekdays, is_enabled })) : []} activityTags={Array.from(new Set(items.map((item) => item.activity_tag).filter((tag): tag is string => !!tag))).sort((a, b) => a.localeCompare(b, 'tr'))} onClose={() => setEditor(null)} onSave={saveItem} onSaveGroup={saveGroup} onDelete={editor.item ? async () => { if (await deleteItem(editor.item!)) setEditor(null); } : editor.group ? async () => { if (await deleteGroup(editor.group!)) setEditor(null); } : undefined} />}
