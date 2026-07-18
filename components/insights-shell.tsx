@@ -8,7 +8,7 @@ import { BottomNav } from './bottom-nav';
 import styles from './planner-shell.module.css';
 
 type GroupRow = { id: string; parent_id: string | null; name: string };
-type ItemRow = { id: string; name: string; group_id: string | null; kind: 'daily' | 'persistent' | 'metric'; metric_unit: string | null; metric_period: 'daily' | 'weekly' | 'monthly' | null; activity_tag: string | null; estimated_minutes: number | null; color: string | null };
+type ItemRow = { id: string; name: string; group_id: string | null; kind: 'daily' | 'persistent' | 'metric'; metric_unit: string | null; metric_period: 'daily' | 'weekly' | 'monthly' | null; activity_tag: string | null; activity_tags: string[]; estimated_minutes: number | null; color: string | null };
 type MetricEntry = { id: string; item_id: string; entry_date: string; value: number };
 type CompletedAssignment = { id: string; item_id: string; plan_date: string; actual_duration_minutes: number | null };
 type Range = 7 | 30 | 90 | 365;
@@ -33,7 +33,7 @@ function Analytics({ user }: { user: User }) {
   useEffect(() => {
     const since = new Date(); since.setDate(since.getDate() - 364);
     void Promise.all([
-      supabase.from('m_items').select('id,name,group_id,kind,metric_unit,metric_period,activity_tag,estimated_minutes,color').eq('is_active', true).order('position'),
+      supabase.from('m_items').select('id,name,group_id,kind,metric_unit,metric_period,activity_tag,activity_tags,estimated_minutes,color').eq('is_active', true).order('position'),
       supabase.from('m_groups').select('id,parent_id,name').order('position'),
       supabase.from('m_metric_entries').select('id,item_id,entry_date,value').gte('entry_date', isoDate(since)).order('entry_date'),
       supabase.from('m_daily_assignments').select('id,item_id,plan_date,actual_duration_minutes').eq('status', 'done').gte('plan_date', isoDate(since)).order('plan_date'),
@@ -67,14 +67,16 @@ function Analytics({ user }: { user: User }) {
   const activitySince = new Date(); activitySince.setDate(activitySince.getDate() - activityRange + 1);
   const activityRows = completed.filter((entry) => entry.plan_date >= isoDate(activitySince)).map((entry) => ({ entry, item: items.find((item) => item.id === entry.item_id) })).filter((row) => row.item?.kind === 'daily' && row.item.activity_tag && (row.entry.actual_duration_minutes || row.item.estimated_minutes));
   const activityStats = Array.from(new Set(activityRows.map((row) => row.item!.activity_tag!))).map((tag) => ({ tag, minutes: activityRows.filter((row) => row.item!.activity_tag === tag).reduce((sum, row) => sum + (row.entry.actual_duration_minutes ?? row.item!.estimated_minutes ?? 0), 0) })).sort((a, b) => b.minutes - a.minutes);
+  const purposeTags = Array.from(new Set(activityRows.flatMap((row) => row.item!.activity_tags ?? [])));
+  const purposeStats = purposeTags.map((tag) => ({ tag, minutes: activityRows.filter((row) => row.item!.activity_tags?.includes(tag)).reduce((sum, row) => sum + (row.entry.actual_duration_minutes ?? row.item!.estimated_minutes ?? 0), 0) })).sort((a, b) => b.minutes - a.minutes);
 
   return <main className={styles.main}><header className={styles.header}><div><p>Ölç, gözlemle, karşılaştır</p><h1>Analitik.</h1></div><div className={styles.headerActions}><div className={styles.rangeSwitch}><button className={range === 7 ? styles.activeRange : ''} onClick={() => setRange(7)}>7 gün</button><button className={range === 30 ? styles.activeRange : ''} onClick={() => setRange(30)}>30 gün</button><button className={range === 90 ? styles.activeRange : ''} onClick={() => setRange(90)}>3 ay</button><button className={range === 365 ? styles.activeRange : ''} onClick={() => setRange(365)}>1 yıl</button></div><AppMenu user={user} active="analytics" /></div></header>
-    <ActivityDuration stats={activityStats} range={activityRange} onRangeChange={setActivityRange} />
+    <ActivityDuration stats={activityStats} purposeStats={purposeStats} range={activityRange} onRangeChange={setActivityRange} />
     <div className={styles.metricCategories}>{categories.map((category) => <section className={styles.metricCategory} key={category.name}><div className={styles.metricCategoryTitle}><span>{category.items.length} metrik</span><h2>{category.name}</h2></div><div className={styles.metricTrendGrid}>{category.items.map((item) => <MetricTrend key={item.id} item={item} entries={visibleEntries.filter((entry) => entry.item_id === item.id)} range={range} since={since} />)}</div></section>)}{metricItems.length === 0 && <div className={styles.empty}>Henüz grafik oluşturacak bir metrik bulunmuyor.</div>}</div>
   </main>;
 }
 
-function ActivityDuration({ stats, range, onRangeChange }: { stats: { tag: string; minutes: number }[]; range: 1 | 7 | 30; onRangeChange: (range: 1 | 7 | 30) => void }) {
+function ActivityDuration({ stats, purposeStats, range, onRangeChange }: { stats: { tag: string; minutes: number }[]; purposeStats: { tag: string; minutes: number }[]; range: 1 | 7 | 30; onRangeChange: (range: 1 | 7 | 30) => void }) {
   const total = stats.reduce((sum, row) => sum + row.minutes, 0);
   const maximum = Math.max(...stats.map((row) => row.minutes), 1);
   const colors = ['#395f47', '#c48255', '#667e99', '#8d76a4', '#b18a4f', '#4f9186', '#ad765e'];
@@ -83,7 +85,8 @@ function ActivityDuration({ stats, range, onRangeChange }: { stats: { tag: strin
     return { cursor: end, values: [...result.values, `${colors[index % colors.length]} ${result.cursor}% ${end}%`] };
   }, { cursor: 0, values: [] }).values;
   function duration(minutes: number) { const hours = Math.floor(minutes / 60); const rest = minutes % 60; return hours ? `${hours} sa${rest ? ` ${rest} dk` : ''}` : `${rest} dk`; }
-  return <section className={styles.activityAnalytics}><div className={styles.activityHeading}><div className={styles.metricCategoryTitle}><span>Tamamlanan aktiviteler</span><h2>Zaman dağılımı</h2></div><div className={styles.activityRange}><button className={range === 1 ? styles.activeRange : ''} onClick={() => onRangeChange(1)}>Bugün</button><button className={range === 7 ? styles.activeRange : ''} onClick={() => onRangeChange(7)}>7 gün</button><button className={range === 30 ? styles.activeRange : ''} onClick={() => onRangeChange(30)}>30 gün</button></div></div>{stats.length ? <div className={styles.activityVisual}><div className={styles.activityPie} style={{ background: `conic-gradient(${slices.join(', ')})` }} role="img" aria-label="Aktivite süre dağılımı"><div><strong>{duration(total)}</strong><small>toplam</small></div></div><div className={styles.activityBars}>{stats.map((row, index) => <div key={row.tag}><header><strong><i style={{ background: colors[index % colors.length] }} />{row.tag}</strong><span>{duration(row.minutes)}</span></header><b><em style={{ width: `${row.minutes / maximum * 100}%`, background: colors[index % colors.length] }} /></b></div>)}</div></div> : <div className={styles.metricEmpty}>Bu dönemde süre bilgisi olan tamamlanmış aktivite yok.</div>}</section>;
+  const purposeMaximum = Math.max(...purposeStats.map((row) => row.minutes), 1);
+  return <section className={styles.activityAnalytics}><div className={styles.activityHeading}><div className={styles.metricCategoryTitle}><span>Tamamlanan aktiviteler</span><h2>Zaman dağılımı</h2></div><div className={styles.activityRange}><button className={range === 1 ? styles.activeRange : ''} onClick={() => onRangeChange(1)}>Bugün</button><button className={range === 7 ? styles.activeRange : ''} onClick={() => onRangeChange(7)}>7 gün</button><button className={range === 30 ? styles.activeRange : ''} onClick={() => onRangeChange(30)}>30 gün</button></div></div>{stats.length ? <div className={styles.activityVisual}><div className={styles.activityPie} style={{ background: `conic-gradient(${slices.join(', ')})` }} role="img" aria-label="Aktivite süre dağılımı"><div><strong>{duration(total)}</strong><small>toplam</small></div></div><div className={styles.activityBars}>{stats.map((row, index) => <div key={row.tag}><header><strong><i style={{ background: colors[index % colors.length] }} />{row.tag}</strong><span>{duration(row.minutes)}</span></header><b><em style={{ width: `${row.minutes / maximum * 100}%`, background: colors[index % colors.length] }} /></b></div>)}</div></div> : <div className={styles.metricEmpty}>Bu dönemde süre bilgisi olan tamamlanmış aktivite yok.</div>}{purposeStats.length > 0 && <div className={styles.activityPurposes}><div className={styles.metricCategoryTitle}><span>Süreler birden fazla amaca katkı sağlayabilir</span><h2>Amaçlar ve etkiler</h2></div><div className={styles.activityBars}>{purposeStats.map((row, index) => <div key={row.tag}><header><strong><i style={{ background: colors[(index + 2) % colors.length] }} />{row.tag}</strong><span>{duration(row.minutes)}</span></header><b><em style={{ width: `${row.minutes / purposeMaximum * 100}%`, background: colors[(index + 2) % colors.length] }} /></b></div>)}</div></div>}</section>;
 }
 
 function MetricTrend({ item, entries, range, since }: { item: ItemRow; entries: MetricEntry[]; range: Range; since: Date }) {

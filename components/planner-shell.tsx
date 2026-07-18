@@ -107,7 +107,7 @@ export function PlannerShell({ user }: { user: User }) {
   const loadData = useCallback(async () => {
     const [groupResult, itemResult, slotResult, assignmentResult, persistentResult, metricResult, noteResult, reminderResult, scheduleResult, blockResult, todoListResult, todoTaskResult] = await Promise.all([
       supabase.from('m_groups').select('id,parent_id,name,color,background_color,position,content_type,default_item_kind,default_time_slot_id,module_key,module_settings,is_in_plan').order('position'),
-      supabase.from('m_items').select('id,group_id,kind,name,description,color,metric_unit,metric_period,activity_tag,estimated_minutes,is_in_plan,position').eq('is_active', true).order('position'),
+      supabase.from('m_items').select('id,group_id,kind,name,description,color,metric_unit,metric_period,activity_tag,activity_tags,estimated_minutes,is_in_plan,position').eq('is_active', true).order('position'),
       supabase.from('m_time_slots').select('id,name,start_time,end_time,color,position,is_active').order('position'),
       supabase.from('m_daily_assignments').select('id,item_id,time_slot_id,plan_date,status,actual_duration_minutes,schedule_id').gte('plan_date', weekStartKey).lte('plan_date', weekEnd),
       supabase.from('m_persistent_states').select('item_id,status,time_slot_id').neq('status', 'cancelled'),
@@ -459,6 +459,7 @@ export function PlannerShell({ user }: { user: User }) {
 
   async function moveItem(itemId: string, groupId: string | null) {
     if (!itemId) return;
+    if (!groupId) { setError('Kütüphane kayıtlarının bir gruba ait olması gerekir.'); return; }
     const position = items.filter((item) => item.group_id === groupId && item.id !== itemId).length;
     const { error: updateError } = await supabase.from('m_items').update({ group_id: groupId, position }).eq('id', itemId);
     if (updateError) setError(updateError.message); else await loadData();
