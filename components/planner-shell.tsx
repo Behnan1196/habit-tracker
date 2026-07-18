@@ -82,6 +82,8 @@ export function PlannerShell({ user }: { user: User }) {
   const [libraryAddTarget, setLibraryAddTarget] = useState<GroupRow | null>(null);
   const [collapsedBlocks, setCollapsedBlocks] = useState<Set<string>>(() => new Set());
   const collapsedBlocksLoaded = useRef(false);
+  const [collapsedLibraryGroups, setCollapsedLibraryGroups] = useState<Set<string>>(() => new Set());
+  const collapsedLibraryGroupsLoaded = useRef(false);
   const [todoLists, setTodoLists] = useState<TodoListRow[]>([]);
   const [todoTasks, setTodoTasks] = useState<TodoTaskRow[]>([]);
   const [activeModule, setActiveModule] = useState<'todo' | 'metrics' | null>(null);
@@ -180,6 +182,15 @@ export function PlannerShell({ user }: { user: User }) {
   useEffect(() => {
     if (collapsedBlocksLoaded.current) window.localStorage.setItem(`momentum-collapsed-blocks:${user.id}`, JSON.stringify([...collapsedBlocks]));
   }, [collapsedBlocks, user.id]);
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem(`momentum-collapsed-library-groups:${user.id}`);
+    queueMicrotask(() => { if (stored) { try { setCollapsedLibraryGroups(new Set(JSON.parse(stored) as string[])); } catch { /* Ignore invalid legacy state. */ } } collapsedLibraryGroupsLoaded.current = true; });
+  }, [user.id]);
+
+  useEffect(() => {
+    if (collapsedLibraryGroupsLoaded.current) window.localStorage.setItem(`momentum-collapsed-library-groups:${user.id}`, JSON.stringify([...collapsedLibraryGroups]));
+  }, [collapsedLibraryGroups, user.id]);
 
   async function enableNotifications() {
     if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) { setNotificationPermission('unsupported'); return; }
@@ -652,9 +663,10 @@ export function PlannerShell({ user }: { user: User }) {
   function renderLibraryGroup(group: GroupRow, depth = 0): React.ReactNode {
     const groupItems = items.filter((item) => item.group_id === group.id && item.kind !== 'metric').sort((a, b) => a.position - b.position);
     const children = groups.filter((candidate) => candidate.parent_id === group.id).sort((a, b) => a.position - b.position);
+    const collapsed = collapsedLibraryGroups.has(group.id);
     return <section className={styles.libraryGroup} key={group.id} draggable onDragStart={(event) => { event.stopPropagation(); event.dataTransfer.setData('text/library-kind', 'group'); event.dataTransfer.setData('text/library-id', group.id); }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); const kind = event.dataTransfer.getData('text/library-kind'); const id = event.dataTransfer.getData('text/library-id'); if (kind === 'item') void moveItem(id, group.id); else if (kind === 'group') void moveGroup(id, group.id); }}>
-      <header style={{ paddingLeft: 10 + Math.min(depth * 12, 36), background: group.background_color ?? '#f4f5f1', color: readableText(group.background_color ?? '#f4f5f1') }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); const kind = event.dataTransfer.getData('text/library-kind'); const id = event.dataTransfer.getData('text/library-id'); if (kind === 'group') void moveBefore('group', id, group.id); else if (kind === 'item') void moveItem(id, group.id); }}><span className={styles.libraryDrag}>⠿</span><i style={{ background: group.color ?? palette[0] }} /><button className={styles.groupTitle} onClick={() => void editGroup(group)}>{group.name}</button><small>{groupItems.length}</small><div><button title="Gruba ekle" onClick={() => setLibraryAddTarget(group)}>＋</button></div></header>
-      {groupItems.map((item) => renderLibraryItem(item, depth + 1))}{children.map((child) => renderLibraryGroup(child, depth + 1))}
+      <header style={{ paddingLeft: 10 + Math.min(depth * 12, 36), background: group.background_color ?? '#f4f5f1', color: readableText(group.background_color ?? '#f4f5f1') }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); const kind = event.dataTransfer.getData('text/library-kind'); const id = event.dataTransfer.getData('text/library-id'); if (kind === 'group') void moveBefore('group', id, group.id); else if (kind === 'item') void moveItem(id, group.id); }}><span className={styles.libraryDrag}>⠿</span><button className={styles.libraryCollapse} aria-label={collapsed ? `${group.name} grubunu aç` : `${group.name} grubunu daralt`} onClick={() => setCollapsedLibraryGroups((current) => { const next = new Set(current); if (next.has(group.id)) next.delete(group.id); else next.add(group.id); return next; })}>{collapsed ? '›' : '⌄'}</button><i style={{ background: group.color ?? palette[0] }} /><button className={styles.groupTitle} onClick={() => void editGroup(group)}>{group.name}</button><small>{groupItems.length + children.length}</small><div><button title="Gruba ekle" onClick={() => setLibraryAddTarget(group)}>＋</button></div></header>
+      {!collapsed && <>{groupItems.map((item) => renderLibraryItem(item, depth + 1))}{children.map((child) => renderLibraryGroup(child, depth + 1))}</>}
     </section>;
   }
 
