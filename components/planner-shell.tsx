@@ -641,13 +641,20 @@ export function PlannerShell({ user }: { user: User }) {
     void saveAgendaOrder([...sourceRows, ...destinationRows]);
   }
 
-  function moveAgendaToBlock(rows: AgendaOrderRow[], movingKey: string, blockId: string | null) {
+  async function moveAgendaToBlock(rows: AgendaOrderRow[], movingKey: string, blockId: string | null) {
     const moving = rows.find((row) => row.key === movingKey);
     if (!moving || moving.blockId === blockId) return;
     if (moving.kind === 'todo' && blockId) { setError('Todo kayıtlarını bloklara taşıma desteği sonraki modül bağlantısında eklenecek.'); return; }
-    const sourceRows = rows.filter((row) => row.key !== movingKey && row.blockId === moving.blockId);
-    const destinationRows = rows.filter((row) => row.blockId === blockId);
-    void saveAgendaOrder([...sourceRows, ...destinationRows, { ...moving, blockId }]);
+    const destinationPositions = rows.filter((row) => row.key !== movingKey && row.blockId === blockId).map((row) => row.position);
+    if (!blockId) {
+      const slotId = moving.schedule?.time_slot_id ?? moving.task?.time_slot_id;
+      if (slotId) destinationPositions.push(...agendaBlocks.filter((block) => block.time_slot_id === slotId).map((block) => block.agenda_position));
+    }
+    const agenda_position = (destinationPositions.length ? Math.max(...destinationPositions) : -1) + 1;
+    const result = moving.kind === 'activity' && moving.schedule
+      ? await supabase.from('m_agenda_schedules').update({ block_id: blockId, agenda_position }).eq('id', moving.schedule.id)
+      : moving.task ? await supabase.from('m_todo_tasks').update({ agenda_position }).eq('id', moving.task.id) : { error: null };
+    if (result.error) setError(result.error.message); else await loadData();
   }
 
   async function moveAgendaNodeBefore(nodes: Array<{ key: string; position: number; row?: AgendaOrderRow; block?: AgendaBlockRow }>, movingKey: string, targetKey: string) {
