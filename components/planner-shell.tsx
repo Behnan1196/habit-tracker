@@ -18,7 +18,7 @@ type PersistentRow = { item_id: string; status: PlanStatus; time_slot_id: string
 type MetricRow = { id: string; item_id: string; entry_date: string; value: number; note: string | null };
 type NoteRow = { id: string; group_id: string; title: string; body: string; is_pinned: boolean; created_at: string; updated_at: string };
 type ReminderRow = ReminderDraft & { id: string; item_id: string };
-type AgendaBlockRow = { id: string; time_slot_id: string; name: string; position: number };
+type AgendaBlockRow = { id: string; time_slot_id: string; name: string; position: number; agenda_position: number };
 type ScheduleRow = { id: string; item_id: string; time_slot_id: string; block_id: string | null; recurrence_type: 'once' | 'daily' | 'weekdays'; weekdays: number[]; start_date: string; end_date: string | null; is_active: boolean; reminder_time: string | null; scheduled_time: string | null; agenda_position: number };
 type ScheduleDraft = { id?: string; time_slot_id: string; block_id: string | null; recurrence_type: 'once' | 'daily' | 'weekdays'; weekdays: number[]; start_date: string; reminder_time: string | null; scheduled_time: string | null; agenda_position: number };
 type AgendaOrderRow = { key: string; kind: 'activity' | 'todo'; blockId: string | null; scheduledTime: string | null; position: number; schedule?: ScheduleRow; task?: TodoTaskRow };
@@ -115,7 +115,7 @@ export function PlannerShell({ user }: { user: User }) {
       supabase.from('m_notes').select('id,group_id,title,body,is_pinned,created_at,updated_at').order('is_pinned', { ascending: false }).order('updated_at', { ascending: false }),
       supabase.from('m_reminders').select('id,item_id,reminder_time,weekdays,is_enabled').order('reminder_time'),
       supabase.from('m_agenda_schedules').select('id,item_id,time_slot_id,block_id,recurrence_type,weekdays,start_date,end_date,is_active,reminder_time,scheduled_time,agenda_position').order('created_at'),
-      supabase.from('m_agenda_blocks').select('id,time_slot_id,name,position').order('position'),
+      supabase.from('m_agenda_blocks').select('id,time_slot_id,name,position,agenda_position').order('agenda_position'),
       supabase.from('m_todo_lists').select('id,name,color,position').order('position'),
       supabase.from('m_todo_tasks').select('id,list_id,title,description,status,priority,agenda_date,time_slot_id,reminder_time,scheduled_time,agenda_position,position').order('position'),
     ]);
@@ -530,8 +530,10 @@ export function PlannerShell({ user }: { user: User }) {
   async function createAgendaBlock(slot: SlotRow) {
     const name = window.prompt(`${slot.name} için blok adı`);
     if (!name?.trim()) return;
-    const position = agendaBlocks.filter((block) => block.time_slot_id === slot.id).length;
-    const result = await supabase.from('m_agenda_blocks').insert({ user_id: user.id, time_slot_id: slot.id, name: name.trim(), position });
+    const slotBlocks = agendaBlocks.filter((block) => block.time_slot_id === slot.id);
+    const positions = [...schedules.filter((schedule) => schedule.time_slot_id === slot.id).map((schedule) => schedule.agenda_position), ...todoTasks.filter((task) => task.time_slot_id === slot.id).map((task) => task.agenda_position), ...slotBlocks.map((block) => block.agenda_position)];
+    const position = slotBlocks.length; const agenda_position = (positions.length ? Math.max(...positions) : -1) + 1;
+    const result = await supabase.from('m_agenda_blocks').insert({ user_id: user.id, time_slot_id: slot.id, name: name.trim(), position, agenda_position });
     if (result.error) setError(result.error.message); else { setAgendaAddTarget(null); await loadData(); }
   }
 
@@ -622,12 +624,16 @@ export function PlannerShell({ user }: { user: User }) {
     void saveAgendaOrder([...sourceRows, ...destinationRows, { ...moving, blockId }]);
   }
 
-  async function moveAgendaBlock(blocks: AgendaBlockRow[], movingId: string, targetId: string) {
-    if (!movingId || movingId === targetId) return;
-    const from = blocks.findIndex((block) => block.id === movingId); const to = blocks.findIndex((block) => block.id === targetId);
+  async function moveAgendaNodeBefore(nodes: Array<{ key: string; position: number; row?: AgendaOrderRow; block?: AgendaBlockRow }>, movingKey: string, targetKey: string) {
+    if (!movingKey || movingKey === targetKey) return;
+    const from = nodes.findIndex((node) => node.key === movingKey); const to = nodes.findIndex((node) => node.key === targetKey);
     if (from < 0 || to < 0) return;
-    const ordered = [...blocks]; const [moving] = ordered.splice(from, 1); ordered.splice(to, 0, moving);
-    const results = await Promise.all(ordered.map((block, position) => supabase.from('m_agenda_blocks').update({ position }).eq('id', block.id)));
+    const ordered = [...nodes]; const [moving] = ordered.splice(from, 1); ordered.splice(to, 0, moving);
+    const results = await Promise.all(ordered.map((node, agenda_position) => node.block
+      ? supabase.from('m_agenda_blocks').update({ agenda_position }).eq('id', node.block.id)
+      : node.row?.kind === 'activity' && node.row.schedule
+        ? supabase.from('m_agenda_schedules').update({ agenda_position }).eq('id', node.row.schedule.id)
+        : node.row?.task ? supabase.from('m_todo_tasks').update({ agenda_position }).eq('id', node.row.task.id) : Promise.resolve({ error: null })));
     const failed = results.find((result) => result.error)?.error;
     if (failed) setError(failed.message); else await loadData();
   }
@@ -644,7 +650,7 @@ export function PlannerShell({ user }: { user: User }) {
     const groupItems = items.filter((item) => item.group_id === group.id && item.kind !== 'metric').sort((a, b) => a.position - b.position);
     const children = groups.filter((candidate) => candidate.parent_id === group.id).sort((a, b) => a.position - b.position);
     return <section className={styles.libraryGroup} key={group.id} draggable onDragStart={(event) => { event.stopPropagation(); event.dataTransfer.setData('text/library-kind', 'group'); event.dataTransfer.setData('text/library-id', group.id); }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); const kind = event.dataTransfer.getData('text/library-kind'); const id = event.dataTransfer.getData('text/library-id'); if (kind === 'item') void moveItem(id, group.id); else if (kind === 'group') void moveGroup(id, group.id); }}>
-      <header style={{ paddingLeft: 10 + Math.min(depth * 12, 36), background: group.background_color ?? '#f4f5f1', color: readableText(group.background_color ?? '#f4f5f1') }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); const kind = event.dataTransfer.getData('text/library-kind'); const id = event.dataTransfer.getData('text/library-id'); if (kind === 'group') void moveBefore('group', id, group.id); else if (kind === 'item') void moveItem(id, group.id); }}><span className={styles.libraryDrag}>⠿</span><i style={{ background: group.color ?? palette[0] }} /><button className={styles.groupTitle} onClick={() => void editGroup(group)}>{group.name}</button><small>{groupItems.length}</small><div><button title="Gruba ekle" onClick={() => setEditor({ groupId: group.id, initialKind: defaultKindForGroup(group.id), initialIsInPlan: false })}>＋</button></div></header>
+      <header style={{ paddingLeft: 10 + Math.min(depth * 12, 36), background: group.background_color ?? '#f4f5f1', color: readableText(group.background_color ?? '#f4f5f1') }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); const kind = event.dataTransfer.getData('text/library-kind'); const id = event.dataTransfer.getData('text/library-id'); if (kind === 'group') void moveBefore('group', id, group.id); else if (kind === 'item') void moveItem(id, group.id); }}><span className={styles.libraryDrag}>⠿</span><i style={{ background: group.color ?? palette[0] }} /><button className={styles.groupTitle} onClick={() => void editGroup(group)}>{group.name}</button><small>{groupItems.length}</small><div><button title="Gruba ekle" onClick={() => setEditor({ groupId: group.id, initialKind: 'daily', initialIsInPlan: false })}>＋</button></div></header>
       {groupItems.map((item) => renderLibraryItem(item, depth + 1))}{children.map((child) => renderLibraryGroup(child, depth + 1))}
     </section>;
   }
@@ -707,14 +713,12 @@ export function PlannerShell({ user }: { user: User }) {
         if (task) return <article draggable className={`${styles.agendaTodoEntry} ${task.status === 'done' ? styles.agendaEntryDone : ''}`} key={row.key} onDragStart={(event) => event.dataTransfer.setData('text/agenda-row', row.key)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); dropAgendaRow(scopedRows, event.dataTransfer.getData('text/agenda-row'), row.key); }}><button className={styles.agendaEntryState} onClick={() => void toggleTodo(task)}><span>{task.status === 'done' ? '✓' : ''}</span></button><button className={styles.agendaEntryIdentity} onClick={() => { setWorkspace('modules'); setActiveModule('todo'); }}><strong>{task.title}</strong><small>{task.scheduled_time ? `${task.scheduled_time.slice(0, 5)} · ` : ''}Todo · {todoLists.find((list) => list.id === task.list_id)?.name ?? 'Gelen Kutusu'}{task.priority === 'high' ? ' · Yüksek' : ''}</small></button><button className={styles.agendaEntryRemove} aria-label="Ajandadan kaldır" onClick={() => void saveTodo({ title: task.title, description: task.description, list_id: task.list_id, priority: task.priority, agenda_date: null, time_slot_id: null, reminder_time: null, scheduled_time: null, agenda_position: task.agenda_position }, task)}>×</button></article>;
         return null;
       };
-      const slotBlocks = agendaBlocks.filter((block) => block.time_slot_id === slot.id).sort((a, b) => a.position - b.position);
+      const slotBlocks = agendaBlocks.filter((block) => block.time_slot_id === slot.id).sort((a, b) => a.agenda_position - b.agenda_position);
       const ungroupedRows = orderRows.filter((row) => !row.blockId);
+      const topNodes: Array<{ key: string; position: number; row?: AgendaOrderRow; block?: AgendaBlockRow }> = [...ungroupedRows.map((row) => ({ key: row.key, position: row.position, row })), ...slotBlocks.map((block) => ({ key: `block-${block.id}`, position: block.agenda_position, block }))].sort((a, b) => a.position - b.position);
       return <section className={styles.agendaSlotSection} key={slot.id}>
         <header onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); moveAgendaToBlock(orderRows, event.dataTransfer.getData('text/agenda-row'), null); }}><i style={{ background: slot.color ?? palette[0] }} /><div><strong>{slot.name}</strong><small>{shortTime(slot.start_time)}–{shortTime(slot.end_time)}</small></div><button className={styles.agendaSlotAdd} aria-label={`${slot.name} zaman dilimine ekle`} onClick={() => setAgendaAddTarget({ slot, date: key })}>＋</button></header>
-        <div>{ungroupedRows.map((row) => renderRow(row, ungroupedRows))}{slotBlocks.map((block) => {
-          const blockRows = orderRows.filter((row) => row.blockId === block.id); const collapsed = collapsedBlocks.has(block.id);
-          return <section className={styles.agendaBlock} key={block.id}><header draggable onDragStart={(event) => event.dataTransfer.setData('text/agenda-block', block.id)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); const movingBlock = event.dataTransfer.getData('text/agenda-block'); if (movingBlock) void moveAgendaBlock(slotBlocks, movingBlock, block.id); else moveAgendaToBlock(orderRows, event.dataTransfer.getData('text/agenda-row'), block.id); }}><button onClick={() => setCollapsedBlocks((current) => { const next = new Set(current); if (next.has(block.id)) next.delete(block.id); else next.add(block.id); return next; })}><span>{collapsed ? '›' : '⌄'}</span><strong>{block.name}</strong><small>{blockRows.length}</small></button><button aria-label={`${block.name} bloğuna aktivite ekle`} onClick={() => { setPreferredSlotId(slot.id); setPreferredBlockId(block.id); setSelectedDate(key); setWorkspace('library'); }}>＋</button></header>{!collapsed && blockRows.map((row) => renderRow(row, blockRows))}</section>;
-        })}{!orderRows.length && !slotBlocks.length && <button className={styles.agendaSlotEmpty} onClick={() => setAgendaAddTarget({ slot, date: key })}>Bu zaman dilimine ekle</button>}</div>
+        <div>{topNodes.map((node) => <div className={styles.agendaNode} key={node.key} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { const movingBlock = event.dataTransfer.getData('text/agenda-block'); if (movingBlock) { event.preventDefault(); void moveAgendaNodeBefore(topNodes, movingBlock, node.key); } }}>{node.row ? renderRow(node.row, ungroupedRows) : (() => { const block = node.block!; const blockRows = orderRows.filter((row) => row.blockId === block.id); const collapsed = collapsedBlocks.has(block.id); return <section className={styles.agendaBlock}><header draggable onDragStart={(event) => event.dataTransfer.setData('text/agenda-block', `block-${block.id}`)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { const movingRow = event.dataTransfer.getData('text/agenda-row'); if (movingRow) { event.preventDefault(); event.stopPropagation(); moveAgendaToBlock(orderRows, movingRow, block.id); } }}><button onClick={() => setCollapsedBlocks((current) => { const next = new Set(current); if (next.has(block.id)) next.delete(block.id); else next.add(block.id); return next; })}><span>{collapsed ? '›' : '⌄'}</span><strong>{block.name}</strong><small>{blockRows.length}</small></button><button aria-label={`${block.name} bloğuna aktivite ekle`} onClick={() => { setPreferredSlotId(slot.id); setPreferredBlockId(block.id); setSelectedDate(key); setWorkspace('library'); }}>＋</button></header>{!collapsed && blockRows.map((row) => renderRow(row, blockRows))}</section>; })()}</div>)}{!orderRows.length && !slotBlocks.length && <button className={styles.agendaSlotEmpty} onClick={() => setAgendaAddTarget({ slot, date: key })}>Bu zaman dilimine ekle</button>}</div>
       </section>;
     })}</div></section>;
   }
