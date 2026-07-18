@@ -620,6 +620,17 @@ export function PlannerShell({ user }: { user: User }) {
       setError('Kesin saatli kayıtlar yalnız aynı saat içindeki kayıtlarla sıralanabilir.');
       return;
     }
+    if (!rows[from].blockId && !rows[to].blockId) {
+      const slotId = rows[to].schedule?.time_slot_id ?? rows[to].task?.time_slot_id;
+      if (slotId) {
+        const topNodes: Array<{ key: string; position: number; row?: AgendaOrderRow; block?: AgendaBlockRow }> = [
+          ...rows.filter((row) => !row.blockId).map((row) => ({ key: row.key, position: row.position, row })),
+          ...agendaBlocks.filter((block) => block.time_slot_id === slotId).map((block) => ({ key: `block-${block.id}`, position: block.agenda_position, block })),
+        ].sort((a, b) => a.position - b.position);
+        void moveAgendaNodeBefore(topNodes, movingKey, targetKey);
+        return;
+      }
+    }
     const targetBlockId = rows[to].blockId;
     const moving = { ...rows[from], blockId: targetBlockId };
     if (moving.kind === 'todo' && targetBlockId) { setError('Todo kayıtlarını bloklara taşıma desteği sonraki modül bağlantısında eklenecek.'); return; }
