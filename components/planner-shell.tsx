@@ -466,8 +466,9 @@ export function PlannerShell({ user }: { user: User }) {
       const siblings = items.filter((item) => item.group_id === target.group_id && item.id !== movingId).sort((a, b) => a.position - b.position);
       const targetIndex = siblings.findIndex((item) => item.id === targetId);
       const ordered = [...siblings.slice(0, targetIndex), items.find((item) => item.id === movingId)!, ...siblings.slice(targetIndex)].filter(Boolean);
-      const result = await supabase.from('m_items').upsert(ordered.map((item, position) => ({ id: item.id, user_id: user.id, group_id: target.group_id, position })));
-      if (result.error) setError(result.error.message); else await loadData();
+      const results = await Promise.all(ordered.map((item, position) => supabase.from('m_items').update({ group_id: target.group_id, position }).eq('id', item.id)));
+      const failed = results.find((result) => result.error)?.error;
+      if (failed) setError(failed.message); else await loadData();
       return;
     }
     const target = groups.find((group) => group.id === targetId);
@@ -482,8 +483,9 @@ export function PlannerShell({ user }: { user: User }) {
     const siblings = groups.filter((group) => group.parent_id === target.parent_id && group.id !== movingId).sort((a, b) => a.position - b.position);
     const targetIndex = siblings.findIndex((group) => group.id === targetId);
     const ordered = [...siblings.slice(0, targetIndex), moving, ...siblings.slice(targetIndex)];
-    const result = await supabase.from('m_groups').upsert(ordered.map((group, position) => ({ id: group.id, user_id: user.id, parent_id: target.parent_id, position })));
-    if (result.error) setError(result.error.message); else await loadData();
+    const results = await Promise.all(ordered.map((group, position) => supabase.from('m_groups').update({ parent_id: target.parent_id, position }).eq('id', group.id)));
+    const failed = results.find((result) => result.error)?.error;
+    if (failed) setError(failed.message); else await loadData();
   }
 
   async function saveSchedule(draft: ScheduleDraft) {
