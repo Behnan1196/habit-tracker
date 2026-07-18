@@ -145,12 +145,13 @@ export function PlannerShell({ user }: { user: User }) {
     if (!activeSchedules.length) return;
     const dates = weekDates.map((date) => ({ date, key: isoDate(date) }));
     const existing = new Set(assignments.map((entry) => `${entry.item_id}:${entry.time_slot_id}:${entry.plan_date}`));
-    const rows = activeSchedules.flatMap((schedule) => dates.filter(({ date, key }) => {
+    const candidates = activeSchedules.flatMap((schedule) => dates.filter(({ date, key }) => {
       if (key < schedule.start_date || (schedule.end_date && key > schedule.end_date)) return false;
       if (schedule.recurrence_type === 'once') return key === schedule.start_date;
       if (schedule.recurrence_type === 'weekdays') return schedule.weekdays.includes(date.getDay());
       return true;
     }).map(({ key }) => ({ user_id: user.id, item_id: schedule.item_id, time_slot_id: schedule.time_slot_id, schedule_id: schedule.id, plan_date: key, status: 'planned', planned_at: new Date().toISOString(), completed_at: null, cancelled_at: null })).filter((row) => !existing.has(`${row.item_id}:${row.time_slot_id}:${row.plan_date}`)));
+    const rows = Array.from(new Map(candidates.map((row) => [`${row.item_id}:${row.time_slot_id}:${row.plan_date}`, row])).values());
     if (rows.length) void supabase.from('m_daily_assignments').upsert(rows, { onConflict: 'user_id,item_id,time_slot_id,plan_date' }).then(({ error: materializeError }) => materializeError ? setError(materializeError.message) : loadData());
   }, [assignments, loadData, schedules, supabase, user.id, weekDates]);
 
@@ -712,7 +713,7 @@ export function PlannerShell({ user }: { user: User }) {
   function renderAgendaDay(date: Date) {
     const key = isoDate(date);
     const dayEntries = assignments.filter((entry) => entry.plan_date === key && entry.status !== 'cancelled');
-    return <section className={styles.agendaDay} key={key}><header><div><span>{new Intl.DateTimeFormat('tr-TR', { weekday: 'long' }).format(date)}</span><strong>{new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'long' }).format(date)}</strong></div>{view === 'weekly' && <button onClick={() => { setSelectedDate(key); setView('daily'); }}>Günü aç</button>}</header><div className={styles.agendaSlots}>{activeSlots.map((slot) => {
+    return <section className={styles.agendaDay} key={key}>{view === 'weekly' && <header><div><span>{new Intl.DateTimeFormat('tr-TR', { weekday: 'long' }).format(date)}</span><strong>{new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'long' }).format(date)}</strong></div><button onClick={() => { setSelectedDate(key); setView('daily'); }}>Günü aç</button></header>}<div className={styles.agendaSlots}>{activeSlots.map((slot) => {
       const slotEntries = dayEntries.filter((entry) => entry.time_slot_id === slot.id);
       const todoEntries = todoTasks.filter((task) => task.agenda_date === key && task.time_slot_id === slot.id);
       const activityRows = slotEntries.map((entry) => ({ entry, item: items.find((candidate) => candidate.id === entry.item_id), schedule: schedules.find((schedule) => schedule.id === entry.schedule_id) ?? schedules.find((schedule) => schedule.item_id === entry.item_id && schedule.time_slot_id === slot.id) })).filter((row): row is typeof row & { item: ItemRow } => !!row.item);
