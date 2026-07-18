@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import styles from './markdown-content.module.css';
 
 function youtubeId(value: string) {
-  try { const url = new URL(value); if (url.hostname.includes('youtu.be')) return url.pathname.slice(1).split('/')[0]; if (url.hostname.includes('youtube.com')) return url.searchParams.get('v') ?? url.pathname.match(/\/shorts\/([^/?]+)/)?.[1] ?? null; } catch { return null; }
+  try { const url = new URL(value); const host = url.hostname.replace(/^www\./, ''); if (host === 'youtu.be') return url.pathname.slice(1).split('/')[0]; if (host === 'youtube.com' || host.endsWith('.youtube.com') || host === 'youtube-nocookie.com') return url.searchParams.get('v') ?? url.pathname.match(/\/(?:shorts|embed)\/([^/?]+)/)?.[1] ?? null; } catch { return null; }
   return null;
 }
 
@@ -27,7 +27,7 @@ export function MarkdownContent({ value }: { value: string }) {
   const flush = () => { if (list.length) { nodes.push(<ul key={`list-${nodes.length}`}>{list.map((entry, index) => <li key={index}>{inline(entry)}</li>)}</ul>); list = []; } };
   lines.forEach((line, index) => {
     const trimmed = line.trim(); const video = youtubeId(trimmed);
-    if (video) { flush(); nodes.push(<a className={styles.youtube} key={index} href={`https://www.youtube.com/watch?v=${video}`} target="_blank" rel="noreferrer"><span style={{ backgroundImage: `url(https://i.ytimg.com/vi/${video}/hqdefault.jpg)` }}><b>▶</b></span><strong>YouTube videosunu izle</strong></a>); return; }
+    if (video) { flush(); nodes.push(<div className={styles.youtube} key={index}><iframe src={`https://www.youtube-nocookie.com/embed/${video}`} title="YouTube video oynatıcı" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen /><a href={`https://www.youtube.com/watch?v=${video}`} target="_blank" rel="noreferrer">YouTube’da aç ↗</a></div>); return; }
     if (/^[-*] /.test(trimmed)) { list.push(trimmed.slice(2)); return; } flush();
     if (!trimmed) { nodes.push(<div className={styles.space} key={index} />); return; }
     if (trimmed.startsWith('### ')) nodes.push(<h4 key={index}>{inline(trimmed.slice(4))}</h4>);
